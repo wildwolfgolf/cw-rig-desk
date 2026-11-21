@@ -1,5 +1,17 @@
 # История версий / Changelog
 
+## 1.2.1
+
+### Русский
+
+- Исправлено декодирование CW из аудиопотока TCI 1.4–1.8 (ExpertSDR2): в заголовке этих серверов поле `length` задаёт кадры, а не отдельные отсчёты. Раньше из каждого пакета читалась только половина, и Морзе не декодировался.
+- После перезапуска DSP сервера TCI аудиопоток запрашивается заново, а не останавливается с ошибкой «Нет аудио RX по TCI».
+
+### English
+
+- Fixed CW decoding from TCI 1.4–1.8 (ExpertSDR2) audio: those servers put the frame count in `length`, not the number of scalar samples. Previously only half of every packet was used, so CW did not decode.
+- After a TCI server DSP restart the audio stream is requested again instead of stopping receive with a "no TCI RX audio" error.
+
 ## 1.2.0
 
 ### Русский

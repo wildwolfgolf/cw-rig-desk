@@ -9,10 +9,13 @@ import websocket
 
 from .localization import Message
 
-# TCI 2.0 section 3.4. Stream.length counts individual samples, not frames.
+# 64-byte TCI stream header: receiver, rate, format, codec, crc, length,
+# stream type, channels, then eight reserved words.
 HEADER = Struct("<8I32x")
 RX_AUDIO = 1
 STREAM_TIMEOUT = 5.0
+MAX_LENGTH = 8192
+FORMATS = {0: ("<i2", 32768), 2: ("<i4", 2147483648), 3: ("<f4", 1)}
 
 
 def read_audio(packet, receiver):
@@ -22,27 +25,43 @@ def read_audio(packet, receiver):
     # TCI 1.8 used stereo and left the channel field reserved.
     channels = channels or 2
     if (source != receiver or stream != RX_AUDIO or codec != 0 or not 8000 <= rate <= 192000
-            or channels not in (1, 2) or not 0 < length <= 8192 or length % channels):
+            or channels not in (1, 2) or not 0 < length <= MAX_LENGTH):
         return None
     data = memoryview(packet)[HEADER.size:]
-    if fmt == 1:  # signed packed 24-bit little-endian PCM
-        if len(data) < length * 3:
-            return None
-        octets = np.frombuffer(data, np.uint8, length * 3).reshape(-1, 3).astype(np.int32)
-        values = octets[:, 0] | (octets[:, 1] << 8) | (octets[:, 2] << 16)
-        samples = ((values ^ 0x800000) - 0x800000).astype(np.float32) / 8388608
-    elif fmt in (0, 2, 3):
-        dtype, scale = {0: ("<i2", 32768), 2: ("<i4", 2147483648), 3: ("<f4", 1)}[fmt]
-        if len(data) < length * np.dtype(dtype).itemsize:
-            return None
-        samples = np.frombuffer(data, dtype, length).astype(np.float32) / scale
+    width = 3 if fmt == 1 else (2 if fmt == 0 else 4 if fmt in (2, 3) else 0)
+    if not width:
+        return None
+    available = len(data) // width
+    # TCI 1.4-1.8 (ExpertSDR2) stores the frame count in Stream.length, while
+    # TCI 1.9+ counts every scalar sample across all channels. The payload size
+    # distinguishes the two; misreading it drops every other half-packet and
+    # makes CW timing impossible to decode.
+    if available >= length * channels:
+        total = length * channels
+    elif available >= length:
+        total = length
     else:
         return None
+    if total % channels:
+        return None
+    if fmt == 1:  # signed packed 24-bit little-endian PCM
+        octets = np.frombuffer(data, np.uint8, total * 3).reshape(-1, 3).astype(np.int32)
+        values = octets[:, 0] | (octets[:, 1] << 8) | (octets[:, 2] << 16)
+        samples = ((values ^ 0x800000) - 0x800000).astype(np.float32) / 8388608
+    else:
+        dtype, scale = FORMATS[fmt]
+        samples = np.frombuffer(data, dtype, total).astype(np.float32) / scale
     # Match the sound-device path by taking the first channel.
     mono = samples[::channels]
     if not np.isfinite(mono).all():
         return None
     return rate, mono, False
+
+
+def request_audio(ws, receiver):
+    ws.send("audio_stream_sample_type:float32;")
+    ws.send("audio_stream_channels:1;")
+    ws.send(f"audio_start:{receiver};")
 
 
 def audio_blocks(url, receiver, stop, tx_active, report):
@@ -64,11 +83,12 @@ def audio_blocks(url, receiver, stop, tx_active, report):
                 continue
             if packet == "":
                 raise ConnectionError("Сервер TCI закрыл соединение.")
-            if not requested and isinstance(packet, str):
-                if any(command.strip().lower() == "ready" for command in packet.split(";")):
-                    ws.send("audio_stream_sample_type:float32;")
-                    ws.send("audio_stream_channels:1;")
-                    ws.send(f"audio_start:{receiver};")
+            if isinstance(packet, str):
+                commands = {command.strip().lower() for command in packet.split(";")}
+                # A later "start" means the server restarted its DSP and dropped
+                # the per-client audio subscription, so it has to be renewed.
+                if "ready" in commands or (requested and "start" in commands):
+                    request_audio(ws, receiver)
                     requested = True
                     deadline = monotonic() + STREAM_TIMEOUT
             if requested and isinstance(packet, bytes):

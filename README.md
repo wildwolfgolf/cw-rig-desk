@@ -12,7 +12,7 @@ Windows desktop workstation for receiving, decoding and transmitting Morse code.
 
 Frequency, mode, bands, VFO/channel, split and PTT follow the selected profile. Meter readings and optional commands depend on the device, server and firmware. Models listed under Hamlib are examples from Hamlib's supported-rig list. Hardware operation has yet to be verified for this release.
 
-![CW Rig Desk main window with demo readings](docs/main-window-en.png)
+![CW Rig Desk main window with the audio waterfall and demo readings](docs/main-window-en.png)
 
 ## Quick start
 

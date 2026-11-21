@@ -43,7 +43,7 @@ Start the SDR and enable TCI in ExpertSDR3. Use the endpoint shown in its settin
 
 Leave **Receive audio directly over TCI** enabled (the default). Connect CAT and click **Start RX** in the **CW receive** panel. **TCI RX** appears below the decoded text once audio packets arrive. If the server does not provide audio streaming, turn off this option, route the SDR audio to a virtual audio cable and select its recording endpoint under **RX input**.
 
-Set **Tone, Hz** to the CW pitch configured in your SDR. The decoder needs keyed dots, dashes and gaps to produce characters.
+Set **Tone, Hz** to the CW pitch configured in your SDR, or leave **Auto tone** enabled so the decoder locks onto the keyed tone it receives. The decoder needs keyed dots, dashes and gaps to produce characters. A technical log of the TCI audio link is written to `%LOCALAPPDATA%\CW_Rig_Desk\tci-audio.log` if you need to troubleshoot.
 
 To transmit, route **TX output** to **Mic PC** in ExpertSDR. Select USB or DIGU and channel A with SPLIT off.
 

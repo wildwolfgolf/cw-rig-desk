@@ -1,5 +1,21 @@
 # История версий / Changelog
 
+## 1.2.2
+
+### Русский
+
+- Приём CW по TCI теперь сам подстраивается под реальный тон SDR и уровень аудиопотока. Раньше декодер принимал только тон в пределах ±50 Гц от поля «Тон, Гц» и сигнал громче −34 дБFS, поэтому при других настройках SDR текст не появлялся.
+- Добавлен флажок «Авто тон»: частота ключевого тона определяется по спектру и показывается в строке состояния.
+- Тихий TCI-поток автоматически усиливается для декодера, а показания уровня остаются в дБFS.
+- Технический журнал TCI сохраняется в `%LOCALAPPDATA%\CW_Rig_Desk\tci-audio.log` (заголовки пакетов, тон, уровень, ошибки).
+
+### English
+
+- CW reception over TCI now adapts to the SDR's actual tone and audio level. Previously the decoder accepted only a tone within ±50 Hz of the "Tone, Hz" value and a signal above −34 dBFS, so different SDR settings produced no text.
+- Added an "Auto tone" option: the keyed tone frequency is detected from the spectrum and shown in the status line.
+- Quiet TCI audio is lifted automatically for the decoder, while the level readout stays in dBFS.
+- A technical TCI log is kept at `%LOCALAPPDATA%\CW_Rig_Desk\tci-audio.log` (packet headers, tone, level, errors).
+
 ## 1.2.1
 
 ### Русский

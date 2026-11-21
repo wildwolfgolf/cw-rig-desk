@@ -100,6 +100,38 @@ class TciAudioTests(TestCase):
             receive_tci((url, 1), SETTINGS.copy(), cancel, Event(), SimpleQueue(), report)
         self.assertEqual("".join(text for event, text in received if event == "text").strip(), phrase)
 
+    def test_auto_tone_decodes_a_quiet_stream_with_another_pitch(self):
+        phrase = "CQ TEST CQ TEST"
+        signal = waveform(encode_text(phrase), 8000, 18, 600, 0.004)
+        signal = np.pad(signal, (400, 2800)).astype("<f4")
+        received = []
+        cancel = Event()
+
+        def peer(ws):
+            ws.send("protocol:ExpertSDR3,2.1;")
+            ws.send("start;")
+            ws.send("ready;")
+            for command in ws:
+                if command == "audio_start:1;":
+                    for i in range(0, signal.size, 256):
+                        ws.send(packet(1, signal[i:i + 256]))
+                elif command == "audio_stop:1;":
+                    return
+
+        def report(name, value):
+            received.append((name, value))
+            if name == "text":
+                text = "".join(part for event, part in received if event == "text")
+                if "CQ TEST" in text:
+                    cancel.set()
+
+        settings = SETTINGS.copy()
+        settings.update(pitch=700, auto_pitch=True)
+        with fixture(peer) as url:
+            receive_tci((url, 1), settings, cancel, Event(), SimpleQueue(), report)
+        text = "".join(part for event, part in received if event == "text")
+        self.assertIn("CQ TEST", text)
+
     def test_dsp_restart_requests_the_stream_again(self):
         commands = []
         restart = Event()

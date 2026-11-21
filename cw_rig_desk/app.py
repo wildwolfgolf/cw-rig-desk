@@ -13,7 +13,7 @@ from tkinter import messagebox, ttk
 from serial.tools import list_ports
 
 from . import __version__
-from . import cat as civ, hamlib_runtime as bundled, network_cat as network, radio, ui_theme as theme
+from . import cat as civ, diagnostics, hamlib_runtime as bundled, network_cat as network, radio, ui_theme as theme
 from .localization import LANGUAGES, Message, error_text, reading_text, translate
 from .morse import encode_text, expand_macro
 
@@ -43,6 +43,7 @@ DEFAULTS = {
     "language": "ru", "input": "", "output": "", "port": "", "address": "70", "pitch": "700",
     "rx_wpm": "18", "tx_wpm": "18", "sensitivity": "-34", "level": "12",
     "lead": "250", "alphabet": "LAT", "adaptive": True, "cw_filter": "Выкл.",
+    "auto_pitch": True,
     "call": "", "other": "", "rst": "599", "macros": DEFAULT_MACROS,
     "profile": network.G90_PROFILE, "hamlib_host": "127.0.0.1", "hamlib_port": "4532",
     "tci_url": "ws://127.0.0.1:40001", "tci_receiver": "0", "tci_audio": True,
@@ -401,9 +402,12 @@ class App:
         self.widget(ttk.Button, status, text="Очистить", command=self.clear).pack(side="right")
         self.widget(ttk.Label, status, textvariable=self.rx_status, style="Hint.TLabel", wraplength=300).pack(anchor="w")
         ttk.Progressbar(status, variable=self.level, maximum=60, length=147).pack(anchor="w", pady=(4, 0))
-        self.widget(ttk.Checkbutton, rx, text="Подстройка скорости", variable=self.settings["adaptive"]).grid(
-            row=4, column=0, sticky="w", pady=(8, 0)
-        )
+        options = ttk.Frame(rx)
+        options.grid(row=4, column=0, sticky="w", pady=(8, 0))
+        self.widget(ttk.Checkbutton, options, text="Подстройка скорости",
+                    variable=self.settings["adaptive"]).pack(side="left")
+        self.widget(ttk.Checkbutton, options, text="Авто тон",
+                    variable=self.settings["auto_pitch"]).pack(side="left", padx=(12, 0))
 
     def build_transmit(self, parent):
         tx = ttk.Frame(parent, style="Card.TFrame", padding=14)
@@ -565,6 +569,8 @@ class App:
             ttk.Checkbutton, tci_panel, text="Звук RX напрямую через TCI", variable=self.settings["tci_audio"]
         )
         self.tci_audio_choice.pack(anchor="w", pady=(6, 0))
+        self.widget(ttk.Label, tci_panel, text=Message("Журнал TCI: {path}", path=diagnostics.LOG),
+                    style="Hint.TLabel", wraplength=465).pack(anchor="w", pady=(2, 0))
 
         self.profile_panels = {
             network.G90_PROFILE: serial, network.LOCAL_HAMLIB_PROFILE: local,
@@ -926,6 +932,7 @@ class App:
             "sensitivity_db": self.read_number("sensitivity", "Порог", -65, -8),
             "alphabet": self.settings["alphabet"].get(),
             "adaptive": self.settings["adaptive"].get(),
+            "auto_pitch": self.settings["auto_pitch"].get(),
             "bandwidth_hz": CW_FILTERS[self.settings["cw_filter"].get()],
         }
 
@@ -1196,12 +1203,12 @@ class App:
             elif event == "text":
                 self.append(data)
             elif event == "meter" and not self.rx_stop.is_set():
-                db, speed, key = data
+                db, speed, key, pitch = data
                 self.level.set(max(0, min(60, db + 60)))
                 mark = Message(" · Тон") if key else ""
-                self.rx_status.set(Message("{prefix}{db:.0f} дБFS · {speed:.1f} WPM{mark}",
+                self.rx_status.set(Message("{prefix}{db:.0f} дБFS · {speed:.1f} WPM · {pitch} Гц{mark}",
                                            prefix="TCI RX · " if self.rx_uses_tci else "",
-                                           db=db, speed=speed, mark=mark))
+                                           db=db, speed=speed, pitch=pitch, mark=mark))
             elif event == "rx_started" and not self.rx_stop.is_set():
                 self.rx_status.set("Приём аудио по TCI" if self.rx_uses_tci else "Приём")
             elif event == "rx_done":

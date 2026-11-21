@@ -156,10 +156,74 @@ class CwBandpass:
         return np.convolve(block, self.taps, mode="valid")
 
 
+class PitchTracker:
+    """Follow the strongest stable keyed tone in a stream.
+
+    The SDR's CW pitch is not reported over TCI and may differ from the value
+    in the interface, so the decoder can lock onto the tone it hears instead.
+    A stable peak well above the noise floor is required before switching.
+    """
+
+    def __init__(self, rate, low=300, high=1200, window_seconds=0.34, interval=0.2):
+        size = 1 << max(10, int(np.ceil(np.log2(rate * window_seconds))))
+        self.rate = rate
+        self.buffer = np.zeros(size, dtype=np.float32)
+        self.window = np.hanning(size).astype(np.float32)
+        self.frequencies = np.fft.rfftfreq(size, 1.0 / rate)
+        self.band = np.flatnonzero((self.frequencies >= low) & (self.frequencies <= high))
+        self.hop = max(1, round(rate * interval))
+        self.pending = np.empty(0, dtype=np.float32)
+        self.candidates = []
+        self.pitch = 0
+
+    def feed(self, samples):
+        if not len(samples):
+            return self.pitch
+        self.pending = np.concatenate((self.pending, samples))
+        while len(self.pending) >= self.hop:
+            chunk = self.pending[:self.hop]
+            self.pending = self.pending[self.hop:]
+            self.buffer[:-len(chunk)] = self.buffer[len(chunk):]
+            self.buffer[-len(chunk):] = chunk
+            frequency = self.detect()
+            if frequency:
+                self.consider(frequency)
+        return self.pitch
+
+    def detect(self):
+        if not len(self.band):
+            return 0.0
+        spectrum = np.abs(np.fft.rfft(self.buffer * self.window))
+        band = spectrum[self.band]
+        position = int(np.argmax(band))
+        level = float(band[position])
+        if level < float(np.median(band)) * 20:
+            return 0.0
+        frequency = float(self.frequencies[self.band[position]])
+        if 0 < position < len(band) - 1:
+            left, right = float(band[position - 1]), float(band[position + 1])
+            denominator = left - 2 * level + right
+            if denominator:
+                frequency += 0.5 * (left - right) / denominator * (self.rate / len(self.buffer))
+        return frequency
+
+    def consider(self, frequency):
+        self.candidates.append(frequency)
+        del self.candidates[:-6]
+        if len(self.candidates) < 6 or max(self.candidates) - min(self.candidates) > 12:
+            return
+        pitch = round(float(np.median(self.candidates)))
+        if abs(pitch - self.pitch) >= 5:
+            self.pitch = pitch
+
+
 class ToneDecoder:
     """Compare energy near the selected pitch with two nearby noise bands."""
 
-    def __init__(self, rate, pitch, alphabet, wpm, sensitivity_db, adaptive=True, bandwidth_hz=0):
+    def __init__(self, rate, pitch, alphabet, wpm, sensitivity_db, adaptive=True, bandwidth_hz=0,
+                 auto_gain=False):
+        self.rate = rate
+        self.pitch = pitch
         self.bandpass = CwBandpass(rate, pitch, bandwidth_hz) if bandwidth_hz else None
         self.hop = round(rate * 0.005)
         self.window_size = self.hop * (3 if 0 < bandwidth_hz <= 100 else 4)
@@ -176,8 +240,20 @@ class ToneDecoder:
         self.streak = 0
         self.key_down = False
         self.level = -100.0
+        self.auto_gain = auto_gain
+        self.peak = 0.0
+        self.gain = 1.0
 
     def feed(self, samples):
+        if self.auto_gain and len(samples):
+            # SDR streams arrive at whatever level the radio produces. Lift
+            # quiet audio slowly so the absolute threshold still works.
+            peak = float(np.max(np.abs(samples)))
+            self.peak = max(peak, self.peak * np.exp(-len(samples) / (self.rate * 2.0)))
+            if self.peak > 0:
+                self.gain = min(100.0, max(1.0, 0.25 / self.peak))
+                if self.gain > 1.0:
+                    samples = samples * self.gain
         if self.bandpass is not None:
             samples = self.bandpass.feed(samples)
         samples = np.concatenate((self.residual, samples))
@@ -191,7 +267,7 @@ class ToneDecoder:
             amplitudes = np.hypot(channels[:7], channels[7:])
             signal = float(amplitudes[2:5].max())
             guard = max(float(amplitudes[:2].max()), float(amplitudes[5:].max()))
-            self.level = 20 * np.log10(max(signal, 1e-5))
+            self.level = 20 * np.log10(max(signal, 1e-5)) - 20 * np.log10(self.gain)
             # Hysteresis and two consecutive frames suppress short impulses.
             tone = signal >= max(self.threshold * (0.83 if self.key_down else 1),
                                  guard * (1.9 if self.key_down else 2.9))

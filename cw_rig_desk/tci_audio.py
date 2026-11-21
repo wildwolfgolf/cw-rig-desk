@@ -7,6 +7,7 @@ from time import monotonic
 import numpy as np
 import websocket
 
+from .diagnostics import note
 from .localization import Message
 
 # 64-byte TCI stream header: receiver, rate, format, codec, crc, length,
@@ -14,7 +15,7 @@ from .localization import Message
 HEADER = Struct("<8I32x")
 RX_AUDIO = 1
 STREAM_TIMEOUT = 5.0
-MAX_LENGTH = 8192
+MAX_LENGTH = 16384
 FORMATS = {0: ("<i2", 32768), 2: ("<i4", 2147483648), 3: ("<f4", 1)}
 
 
@@ -59,18 +60,24 @@ def read_audio(packet, receiver):
 
 
 def request_audio(ws, receiver):
-    ws.send("audio_stream_sample_type:float32;")
-    ws.send("audio_stream_channels:1;")
-    ws.send(f"audio_start:{receiver};")
+    commands = ("audio_stream_sample_type:float32;", "audio_stream_channels:1;",
+                f"audio_start:{receiver};")
+    for command in commands:
+        ws.send(command)
+    note(f"sent {''.join(commands)}")
 
 
 def audio_blocks(url, receiver, stop, tx_active, report):
     ws = None
     requested = False
     received = False
+    packets = 0
+    texts = 0
+    last_note = 0.0
     try:
         ws = websocket.create_connection(url, timeout=2, suppress_origin=True)
         ws.settimeout(0.15)
+        note(f"connected {url}, receiver {receiver}")
         deadline = monotonic() + STREAM_TIMEOUT
         while not stop.is_set():
             if requested and tx_active.is_set():
@@ -85,6 +92,9 @@ def audio_blocks(url, receiver, stop, tx_active, report):
                 raise ConnectionError("Сервер TCI закрыл соединение.")
             if isinstance(packet, str):
                 commands = {command.strip().lower() for command in packet.split(";")}
+                if texts < 30:
+                    note(f"server: {packet[:400]}")
+                    texts += 1
                 # A later "start" means the server restarted its DSP and dropped
                 # the per-client audio subscription, so it has to be renewed.
                 if "ready" in commands or (requested and "start" in commands):
@@ -92,9 +102,21 @@ def audio_blocks(url, receiver, stop, tx_active, report):
                     requested = True
                     deadline = monotonic() + STREAM_TIMEOUT
             if requested and isinstance(packet, bytes):
+                if packets < 3:
+                    source, rate, fmt, codec, _, length, stream, channels = HEADER.unpack_from(packet)
+                    note("packet receiver={} rate={} format={} codec={} length={} type={} "
+                         "channels={} payload={}".format(source, rate, fmt, codec, length, stream,
+                                                        channels, len(packet) - HEADER.size))
+                packets += 1
                 block = read_audio(packet, receiver)
                 if block is None:
+                    if packets <= 3:
+                        note("packet rejected by the validator")
                     continue
+                now = monotonic()
+                if now - last_note >= 5:
+                    note(f"stream: {packets} packets, {block[0]} Hz, {len(block[1])} samples/packet")
+                    last_note = now
                 deadline = monotonic() + STREAM_TIMEOUT
                 if not received:
                     report("rx_started", "")
@@ -102,6 +124,7 @@ def audio_blocks(url, receiver, stop, tx_active, report):
                 yield block
     except (websocket.WebSocketException, OSError) as error:
         if not stop.is_set():
+            note(f"transport error: {error!r}")
             if isinstance(error, ConnectionError):
                 raise
             raise ConnectionError(Message("Ошибка аудио TCI: {detail}", detail=str(error))) from error
@@ -112,3 +135,4 @@ def audio_blocks(url, receiver, stop, tx_active, report):
                     ws.send(f"audio_stop:{receiver};")
             with suppress(websocket.WebSocketException, OSError):
                 ws.close(timeout=0.2)
+            note("closed")

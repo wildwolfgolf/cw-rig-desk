@@ -9,7 +9,8 @@ import numpy as np
 from serial.tools import list_ports
 import sounddevice as sd
 
-from .morse import ToneDecoder, encode_text, waveform
+from .diagnostics import note
+from .morse import PitchTracker, ToneDecoder, encode_text, waveform
 from .tci_audio import audio_blocks
 
 
@@ -43,15 +44,20 @@ def receive(device, settings, stop, tx_active, filter_updates, report):
 def receive_tci(source, settings, stop, tx_active, filter_updates, report):
     url, receiver = source
     with closing(audio_blocks(url, receiver, stop, tx_active, report)) as blocks:
-        decode_blocks(blocks, settings, stop, tx_active, filter_updates, report)
+        decode_blocks(blocks, settings, stop, tx_active, filter_updates, report, auto_gain=True)
 
 
-def decode_blocks(blocks, settings, stop, tx_active, filter_updates, report):
+def decode_blocks(blocks, settings, stop, tx_active, filter_updates, report, auto_gain=False):
     decoder = None
+    tracker = None
     current_rate = 0
+    pitch = settings["pitch"]
+    auto_pitch = settings.get("auto_pitch", False)
     bandwidth = settings["bandwidth_hz"]
     muted = False
     last_report = 0.0
+    last_note = 0.0
+    packets = 0
     for rate, samples, overflow in blocks:
         if stop.is_set():
             break
@@ -63,9 +69,19 @@ def decode_blocks(blocks, settings, stop, tx_active, filter_updates, report):
                 bandwidth = filter_updates.get_nowait()
         except Empty:
             pass
+        if auto_pitch:
+            if tracker is None or tracker.rate != rate:
+                tracker = PitchTracker(rate)
+            found = tracker.feed(samples)
+            if found and abs(found - pitch) >= 5:
+                pitch = found
+                decoder = None
+                if auto_gain:
+                    note(f"tone locked at {pitch} Hz")
         if decoder is None or muted or overflow or rate != current_rate or bandwidth != settings["bandwidth_hz"]:
             settings["bandwidth_hz"] = bandwidth
-            decoder = ToneDecoder(rate, **settings)
+            options = {key: value for key, value in settings.items() if key not in ("pitch", "auto_pitch")}
+            decoder = ToneDecoder(rate, pitch, auto_gain=auto_gain, **options)
             current_rate = rate
             muted = False
         text = decoder.feed(samples)
@@ -73,8 +89,14 @@ def decode_blocks(blocks, settings, stop, tx_active, filter_updates, report):
             report("text", text)
         now = time.monotonic()
         if now - last_report >= 0.1:
-            report("meter", (decoder.level, 1.2 / decoder.timing.dot, decoder.key_down))
+            report("meter", (decoder.level, 1.2 / decoder.timing.dot, decoder.key_down, pitch))
             last_report = now
+        packets += 1
+        if auto_gain and now - last_note >= 5:
+            note(f"decode: {packets} blocks, rate={rate}, pitch={pitch}, "
+                 f"level={decoder.level:.1f} dBFS, speed={1.2 / decoder.timing.dot:.1f} WPM, "
+                 f"gain={decoder.gain:.1f}")
+            last_note = now
 
 
 def transmit(device, words, pitch, wpm, gain, lead, cancel, rig, telemetry, report):
@@ -129,6 +151,7 @@ def demo(settings, report):
     noise = np.random.default_rng(42).normal(0, 0.025, len(tone) + rate // 2)
     noise = noise.astype(np.float32)
     noise[:len(tone)] += tone
-    decoder = ToneDecoder(rate, **settings)
+    options = {key: value for key, value in settings.items() if key != "auto_pitch"}
+    decoder = ToneDecoder(rate, **options)
     result = "".join(decoder.feed(noise[i:i + 185]) for i in range(0, len(noise), 185))
     report("demo_text", (phrase, result.strip()))

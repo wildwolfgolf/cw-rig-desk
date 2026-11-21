@@ -33,6 +33,7 @@ ENGLISH = {
     "Фильтр CW, Гц": "CW filter, Hz",
     "Очистить": "Clear",
     "Подстройка скорости": "Track speed",
+    "Авто тон": "Auto tone",
     "Передача CW": "CW transmit",
     "Изменить макросы": "Edit macros",
     "Мой позывной": "My callsign",
@@ -128,7 +129,10 @@ ENGLISH = {
     "Сообщение передано": "Message sent",
     " · Тон": " · Tone",
     "{prefix}{db:.0f} дБFS · {speed:.1f} WPM{mark}": "{prefix}{db:.0f} dBFS · {speed:.1f} WPM{mark}",
+    "{prefix}{db:.0f} дБFS · {speed:.1f} WPM · {pitch} Гц{mark}":
+        "{prefix}{db:.0f} dBFS · {speed:.1f} WPM · {pitch} Hz{mark}",
     "Звук RX напрямую через TCI": "Receive audio directly over TCI",
+    "Журнал TCI: {path}": "TCI log: {path}",
     "Сначала подключите CAT по TCI.": "Connect CAT over TCI first.",
     "Ожидание аудио RX по TCI…": "Waiting for TCI RX audio…",
     "Приём аудио по TCI": "Receiving TCI audio",

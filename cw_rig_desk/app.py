@@ -154,8 +154,8 @@ class App:
 
         self.reflect(root, root.title, Message("CW Rig Desk {version} — приём и передача Морзе",
                                               version=__version__))
-        root.minsize(1010, 710)
-        root.geometry("1180x780")
+        root.minsize(1010, 780)
+        root.geometry("1180x860")
         root.protocol("WM_DELETE_WINDOW", self.close)
         root.bind("<Escape>", lambda event: self.stop_tx())
         root.bind("<Control-Return>", lambda event: self.send())
@@ -403,7 +403,7 @@ class App:
         self.widget(ttk.Label, screen, text="Водопад · 0–1600 Гц", style="MeterTitle.TLabel").grid(
             row=0, column=0, sticky="w", padx=8, pady=(4, 2)
         )
-        self.waterfall = Waterfall(screen, font=(self.mono_font, 8), height=104)
+        self.waterfall = Waterfall(screen, font=(self.mono_font, 8), height=92)
         self.waterfall.grid(row=1, column=0, sticky="ew", padx=6, pady=(0, 6))
 
         self.rx_text = self.text_box(rx, 3, 6, readonly=True)

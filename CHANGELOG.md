@@ -1,5 +1,15 @@
 # История версий / Changelog
 
+## 1.3.1
+
+### Русский
+
+- Окно по умолчанию выше, а водопад компактнее: область декодированного текста снова занимает несколько строк.
+
+### English
+
+- The default window is taller and the waterfall more compact, so the decoded-text area keeps several lines.
+
 ## 1.3.0
 
 ### Русский

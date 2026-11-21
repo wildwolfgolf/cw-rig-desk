@@ -6,6 +6,8 @@ from threading import Event
 from traceback import format_exc
 import tkinter as tk
 
+import numpy as np
+
 from . import __version__, app, hamlib_runtime, radio
 from .app import App, load_settings
 
@@ -53,6 +55,9 @@ def run(report_path):
         if gui.rx_status.source.startswith("Ошибка списка устройств"):
             raise RuntimeError(gui.rx_status.get())
         check_languages(gui)
+        gui.waterfall.add(np.linspace(-90, -10, 160))
+        gui.waterfall.set_target(700, 200)
+        gui.waterfall.draw()
         audio, _ = radio.sd.get_portaudio_version()
         if not audio:
             raise RuntimeError("PortAudio failed to load")

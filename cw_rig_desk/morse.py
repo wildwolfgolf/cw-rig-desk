@@ -217,6 +217,36 @@ class PitchTracker:
             self.pitch = pitch
 
 
+class AudioSpectrum:
+    """One row of the audio waterfall, about every 60 ms."""
+
+    def __init__(self, rate, low=0, high=1600, bins=160, window_seconds=0.05, interval=0.06):
+        self.rate = rate
+        self.interval = interval
+        self.last = 0.0
+        size = 1 << max(9, int(round(np.log2(rate * window_seconds))))
+        self.window = np.hanning(size).astype(np.float32)
+        self.scale = 2.0 / self.window.sum()
+        frequencies = np.fft.rfftfreq(size, d=1 / rate)
+        edges = np.linspace(low, high, bins + 1)
+        self.groups = [np.flatnonzero((frequencies >= start) & (frequencies < end))
+                       for start, end in zip(edges[:-1], edges[1:])]
+        self.buffer = np.empty(0, dtype=np.float32)
+
+    def push(self, samples, now):
+        if not len(samples):
+            return None
+        self.buffer = np.concatenate((self.buffer, samples))[-len(self.window):]
+        if len(self.buffer) < len(self.window) or now - self.last < self.interval:
+            return None
+        self.last = now
+        spectrum = np.abs(np.fft.rfft(self.buffer * self.window)) * self.scale
+        values = np.empty(len(self.groups), dtype=np.float32)
+        for index, group in enumerate(self.groups):
+            values[index] = 20 * np.log10(max(float(spectrum[group].max()), 1e-6)) if len(group) else -120.0
+        return values
+
+
 class ToneDecoder:
     """Compare energy near the selected pitch with two nearby noise bands."""
 

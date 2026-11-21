@@ -24,6 +24,7 @@ ENGLISH = {
     "Диапазон": "Band",
     "{band} м": "{band} m",
     "Приём CW": "CW receive",
+    "Водопад · 0–1600 Гц": "Waterfall · 0–1600 Hz",
     "Остановить приём": "Stop RX",
     "Запустить": "Start RX",
     "Демо": "Demo",

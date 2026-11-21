@@ -13,6 +13,7 @@ from tkinter import messagebox, ttk
 from serial.tools import list_ports
 
 from . import __version__
+from .waterfall import Waterfall
 from . import cat as civ, diagnostics, hamlib_runtime as bundled, network_cat as network, radio, ui_theme as theme
 from .localization import LANGUAGES, Message, error_text, reading_text, translate
 from .morse import encode_text, expand_macro
@@ -368,7 +369,7 @@ class App:
         rx = ttk.Frame(parent, style="Card.TFrame", padding=14)
         rx.grid(row=2, column=0, sticky="nsew", padx=(0, 6))
         rx.columnconfigure(0, weight=1)
-        rx.rowconfigure(2, weight=1)
+        rx.rowconfigure(3, weight=1)
         header = ttk.Frame(rx)
         header.grid(row=0, column=0, sticky="ew", pady=(0, 10))
         self.widget(ttk.Label, header, text="Приём CW", style="Heading.TLabel").pack(side="left")
@@ -396,14 +397,23 @@ class App:
         self.localize_choices(cw_filter, "cw_filter", lambda: tuple(CW_FILTERS))
         cw_filter.bind("<<ComboboxSelected>>", self.change_rx_filter, add="+")
 
-        self.rx_text = self.text_box(rx, 2, 6, readonly=True)
+        screen = ttk.Frame(rx, style="Screen.TFrame")
+        screen.grid(row=2, column=0, sticky="ew", pady=(0, 8))
+        screen.columnconfigure(0, weight=1)
+        self.widget(ttk.Label, screen, text="Водопад · 0–1600 Гц", style="MeterTitle.TLabel").grid(
+            row=0, column=0, sticky="w", padx=8, pady=(4, 2)
+        )
+        self.waterfall = Waterfall(screen, font=(self.mono_font, 8), height=104)
+        self.waterfall.grid(row=1, column=0, sticky="ew", padx=6, pady=(0, 6))
+
+        self.rx_text = self.text_box(rx, 3, 6, readonly=True)
         status = ttk.Frame(rx)
-        status.grid(row=3, column=0, sticky="ew", pady=(9, 0))
+        status.grid(row=4, column=0, sticky="ew", pady=(9, 0))
         self.widget(ttk.Button, status, text="Очистить", command=self.clear).pack(side="right")
         self.widget(ttk.Label, status, textvariable=self.rx_status, style="Hint.TLabel", wraplength=300).pack(anchor="w")
         ttk.Progressbar(status, variable=self.level, maximum=60, length=147).pack(anchor="w", pady=(4, 0))
         options = ttk.Frame(rx)
-        options.grid(row=4, column=0, sticky="w", pady=(8, 0))
+        options.grid(row=5, column=0, sticky="w", pady=(8, 0))
         self.widget(ttk.Checkbutton, options, text="Подстройка скорости",
                     variable=self.settings["adaptive"]).pack(side="left")
         self.widget(ttk.Checkbutton, options, text="Авто тон",
@@ -971,6 +981,8 @@ class App:
         self.rx_uses_tci = via_tci
         self.rx_stop.clear()
         self.rx_filter_updates = queue.SimpleQueue()
+        self.waterfall.clear()
+        self.waterfall.set_target(settings["pitch"], settings["bandwidth_hz"])
         self.update_rx_buttons()
         self.rx_status.set("Ожидание аудио RX по TCI…" if via_tci else "Открываю аудиовход…")
         self.run("rx", radio.receive_tci if via_tci else radio.receive, source, settings, self.rx_stop, self.tx_active,
@@ -1202,9 +1214,12 @@ class App:
                     self.notify(messagebox.showerror, "CAT", data, parent=self.root)
             elif event == "text":
                 self.append(data)
+            elif event == "waterfall" and not self.rx_stop.is_set():
+                self.waterfall.add(data)
             elif event == "meter" and not self.rx_stop.is_set():
                 db, speed, key, pitch = data
                 self.level.set(max(0, min(60, db + 60)))
+                self.waterfall.set_target(pitch, CW_FILTERS[self.settings["cw_filter"].get()])
                 mark = Message(" · Тон") if key else ""
                 self.rx_status.set(Message("{prefix}{db:.0f} дБFS · {speed:.1f} WPM · {pitch} Гц{mark}",
                                            prefix="TCI RX · " if self.rx_uses_tci else "",

@@ -10,7 +10,7 @@ from serial.tools import list_ports
 import sounddevice as sd
 
 from .diagnostics import note
-from .morse import PitchTracker, ToneDecoder, encode_text, waveform
+from .morse import AudioSpectrum, PitchTracker, ToneDecoder, encode_text, waveform
 from .tci_audio import audio_blocks
 
 
@@ -50,6 +50,7 @@ def receive_tci(source, settings, stop, tx_active, filter_updates, report):
 def decode_blocks(blocks, settings, stop, tx_active, filter_updates, report, auto_gain=False):
     decoder = None
     tracker = None
+    spectrum = None
     current_rate = 0
     pitch = settings["pitch"]
     auto_pitch = settings.get("auto_pitch", False)
@@ -64,6 +65,12 @@ def decode_blocks(blocks, settings, stop, tx_active, filter_updates, report, aut
         if tx_active.is_set():
             muted = True
             continue
+        now = time.monotonic()
+        if spectrum is None or spectrum.rate != rate:
+            spectrum = AudioSpectrum(rate)
+        row = spectrum.push(samples, now)
+        if row is not None:
+            report("waterfall", row)
         try:
             while True:
                 bandwidth = filter_updates.get_nowait()
@@ -87,7 +94,6 @@ def decode_blocks(blocks, settings, stop, tx_active, filter_updates, report, aut
         text = decoder.feed(samples)
         if text:
             report("text", text)
-        now = time.monotonic()
         if now - last_report >= 0.1:
             report("meter", (decoder.level, 1.2 / decoder.timing.dot, decoder.key_down, pitch))
             last_report = now

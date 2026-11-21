@@ -2,7 +2,7 @@ import unittest
 
 import numpy as np
 
-from cw_rig_desk.morse import PitchTracker, ToneDecoder, encode_text, waveform
+from cw_rig_desk.morse import AudioSpectrum, PitchTracker, ToneDecoder, encode_text, waveform
 
 
 class MorseTests(unittest.TestCase):
@@ -44,3 +44,14 @@ class MorseTests(unittest.TestCase):
         result = "".join(decoder.feed(samples[i:i + 960]) for i in range(0, samples.size, 960))
         self.assertEqual(result.strip(), expected)
         self.assertLess(decoder.level, -30)
+
+    def test_spectrum_reports_the_tone_frequency(self):
+        rate = 48000
+        time = np.arange(4096) / rate
+        samples = (0.4 * np.sin(2 * np.pi * 600 * time)).astype(np.float32)
+        spectrum = AudioSpectrum(rate)
+        row = spectrum.push(samples, now=1.0)
+        self.assertIsNotNone(row)
+        self.assertEqual(row.size, 160)
+        peak = int(np.argmax(row)) * 1600 / 160
+        self.assertAlmostEqual(peak, 600, delta=20)

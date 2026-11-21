@@ -1,5 +1,19 @@
 # История версий / Changelog
 
+## 1.3.0
+
+### Русский
+
+- Добавлен водопад принимаемого аудио 0–1600 Гц. Водопад прокручивается по времени и работает как для TCI, так и для звуковой карты.
+- Прицельная рамка показывает текущий тон декодера и полосу выбранного CW-фильтра: видно, совпадает ли сигнал с настройкой и попадает ли он в фильтр.
+- В строке состояния показывается распознанный тон, поэтому автоподстройку и водопад удобно использовать вместе.
+
+### English
+
+- Added a 0–1600 Hz waterfall of the received audio. It scrolls over time and works for both TCI and sound-card input.
+- The aiming frame marks the decoder tone and the selected CW filter, so you can see whether the signal matches the setting and stays inside the filter.
+- The detected tone is shown in the status line, making the waterfall and auto tone work together.
+
 ## 1.2.2
 
 ### Русский

@@ -127,7 +127,14 @@ ENGLISH = {
     "Передача прервана": "Transmission stopped",
     "Сообщение передано": "Message sent",
     " · Тон": " · Tone",
-    "{db:.0f} дБFS · {speed:.1f} WPM{mark}": "{db:.0f} dBFS · {speed:.1f} WPM{mark}",
+    "{prefix}{db:.0f} дБFS · {speed:.1f} WPM{mark}": "{prefix}{db:.0f} dBFS · {speed:.1f} WPM{mark}",
+    "Звук RX напрямую через TCI": "Receive audio directly over TCI",
+    "Сначала подключите CAT по TCI.": "Connect CAT over TCI first.",
+    "Ожидание аудио RX по TCI…": "Waiting for TCI RX audio…",
+    "Приём аудио по TCI": "Receiving TCI audio",
+    "Нет аудио RX по TCI. Проверьте, что приёмник SDR запущен и сервер поддерживает аудио TCI.":
+        "No TCI RX audio. Make sure the SDR is running and the server supports TCI audio.",
+    "Ошибка аудио TCI: {detail}": "TCI audio error: {detail}",
     "\n[Демо] Передано: {expected}\n[Демо] Принято: {actual}\n":
         "\n[Demo] Sent: {expected}\n[Demo] Received: {actual}\n",
     "Частота": "Frequency",

@@ -1,5 +1,6 @@
 """Capture and play CW audio on the selected sound devices."""
 
+from contextlib import closing
 from queue import Empty
 import threading
 import time
@@ -9,6 +10,7 @@ from serial.tools import list_ports
 import sounddevice as sd
 
 from .morse import ToneDecoder, encode_text, waveform
+from .tci_audio import audio_blocks
 
 
 def devices():
@@ -27,34 +29,52 @@ def devices():
 
 def receive(device, settings, stop, tx_active, filter_updates, report):
     index, rate, channels = device
-    decoder = ToneDecoder(rate, **settings)
-    last_report = 0.0
     with sd.InputStream(device=index, samplerate=rate, channels=channels, dtype="float32",
                         latency="low") as stream:
+        def blocks():
+            while not stop.is_set():
+                samples, overflow = stream.read(round(rate * 0.025))
+                yield rate, samples[:, 0], overflow
+
         report("rx_started", "")
-        muted = False
-        while not stop.is_set():
-            samples, overflow = stream.read(round(rate * 0.025))
-            if tx_active.is_set():
-                muted = True
-                continue
-            bandwidth = settings["bandwidth_hz"]
-            try:
-                while True:
-                    bandwidth = filter_updates.get_nowait()
-            except Empty:
-                pass
-            if muted or overflow or bandwidth != settings["bandwidth_hz"]:
-                settings["bandwidth_hz"] = bandwidth
-                decoder = ToneDecoder(rate, **settings)
-                muted = False
-            text = decoder.feed(samples[:, 0])
-            if text:
-                report("text", text)
-            now = time.monotonic()
-            if now - last_report >= 0.1:
-                report("meter", (decoder.level, 1.2 / decoder.timing.dot, decoder.key_down))
-                last_report = now
+        decode_blocks(blocks(), settings, stop, tx_active, filter_updates, report)
+
+
+def receive_tci(source, settings, stop, tx_active, filter_updates, report):
+    url, receiver = source
+    with closing(audio_blocks(url, receiver, stop, tx_active, report)) as blocks:
+        decode_blocks(blocks, settings, stop, tx_active, filter_updates, report)
+
+
+def decode_blocks(blocks, settings, stop, tx_active, filter_updates, report):
+    decoder = None
+    current_rate = 0
+    bandwidth = settings["bandwidth_hz"]
+    muted = False
+    last_report = 0.0
+    for rate, samples, overflow in blocks:
+        if stop.is_set():
+            break
+        if tx_active.is_set():
+            muted = True
+            continue
+        try:
+            while True:
+                bandwidth = filter_updates.get_nowait()
+        except Empty:
+            pass
+        if decoder is None or muted or overflow or rate != current_rate or bandwidth != settings["bandwidth_hz"]:
+            settings["bandwidth_hz"] = bandwidth
+            decoder = ToneDecoder(rate, **settings)
+            current_rate = rate
+            muted = False
+        text = decoder.feed(samples)
+        if text:
+            report("text", text)
+        now = time.monotonic()
+        if now - last_report >= 0.1:
+            report("meter", (decoder.level, 1.2 / decoder.timing.dot, decoder.key_down))
+            last_report = now
 
 
 def transmit(device, words, pitch, wpm, gain, lead, cancel, rig, telemetry, report):

@@ -45,7 +45,7 @@ DEFAULTS = {
     "lead": "250", "alphabet": "LAT", "adaptive": True, "cw_filter": "Выкл.",
     "call": "", "other": "", "rst": "599", "macros": DEFAULT_MACROS,
     "profile": network.G90_PROFILE, "hamlib_host": "127.0.0.1", "hamlib_port": "4532",
-    "tci_url": "ws://127.0.0.1:40001", "tci_receiver": "0",
+    "tci_url": "ws://127.0.0.1:40001", "tci_receiver": "0", "tci_audio": True,
     "hamlib_model": "", "hamlib_device": bundled.AUTO, "hamlib_baud": bundled.AUTO,
 }
 
@@ -118,6 +118,7 @@ class App:
         self.details = None
         self.ports_found = []
         self.rx_running = False
+        self.rx_uses_tci = False
         self.tx_running = False
         self.closing = False
         self.macros = []
@@ -262,6 +263,7 @@ class App:
         self.build_receive(body)
         self.build_transmit(body)
         self.build_equipment()
+        self.update_rx_buttons()
         self.update_tx_buttons()
         self.update_cat_buttons()
 
@@ -378,8 +380,6 @@ class App:
         )
         self.rx_start_button.pack(side="right", padx=(4, 4))
         self.widget(ttk.Button, header, text="Демо", command=self.demo, style="Control.TButton").pack(side="right")
-        self.update_rx_buttons()
-
         params = ttk.Frame(rx)
         params.grid(row=1, column=0, sticky="ew", pady=(0, 10))
         self.number(params, "Тон, Гц", "pitch", 0, 300, 1200, 10)
@@ -550,8 +550,10 @@ class App:
         self.hamlib_port = ttk.Entry(hamlib, textvariable=self.settings["hamlib_port"], width=7)
         self.hamlib_port.pack(side="left")
 
-        tci = ttk.Frame(frame)
-        tci.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        tci_panel = ttk.Frame(frame)
+        tci_panel.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        tci = ttk.Frame(tci_panel)
+        tci.pack(anchor="w")
         self.widget(ttk.Label, tci, text="Адрес TCI", style="Hint.TLabel").pack(side="left")
         self.tci_url = ttk.Entry(tci, textvariable=self.settings["tci_url"], width=28)
         self.tci_url.pack(side="left", padx=8)
@@ -559,10 +561,14 @@ class App:
         self.tci_receiver = ttk.Combobox(tci, textvariable=self.settings["tci_receiver"],
                                          values=("0", "1"), width=3, state="readonly")
         self.tci_receiver.pack(side="left")
+        self.tci_audio_choice = self.widget(
+            ttk.Checkbutton, tci_panel, text="Звук RX напрямую через TCI", variable=self.settings["tci_audio"]
+        )
+        self.tci_audio_choice.pack(anchor="w", pady=(6, 0))
 
         self.profile_panels = {
             network.G90_PROFILE: serial, network.LOCAL_HAMLIB_PROFILE: local,
-            network.REMOTE_HAMLIB_PROFILE: hamlib, network.TCI_PROFILE: tci,
+            network.REMOTE_HAMLIB_PROFILE: hamlib, network.TCI_PROFILE: tci_panel,
         }
         footer = ttk.Frame(frame)
         footer.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(12, 0))
@@ -765,6 +771,8 @@ class App:
             self.cat_ready = False
             self.armed.set(False)
             self.cat_status.set("Отключение CAT…")
+            if self.rx_uses_tci:
+                self.stop_rx()
             self.cat_stop.set()
             self.update_tx_buttons()
             self.update_cat_buttons()
@@ -929,27 +937,36 @@ class App:
         self.rx_start_button.state(["disabled" if self.rx_running or self.closing else "!disabled"])
         can_stop = self.rx_running and not self.rx_stop.is_set() and not self.closing
         self.rx_stop_button.state(["!disabled" if can_stop else "disabled"])
+        self.tci_audio_choice.state(["disabled" if self.rx_running else "!disabled"])
 
     def start_rx(self):
         if self.rx_running or self.closing:
             return
         try:
             settings = self.rx_settings()
-            device = self.inputs.get(self.settings["input"].get())
-            if not device:
-                self.show_equipment()
-                self.notify(messagebox.showwarning, "Приём", "Выберите аудиоустройство «Вход RX».",
-                                       parent=self.equipment)
-                return
+            via_tci = self.settings["profile"].get() == network.TCI_PROFILE and self.settings["tci_audio"].get()
+            if via_tci:
+                rig = getattr(self.session, "driver", None)
+                if not self.cat_ready or not isinstance(rig, network.Tci):
+                    raise ValueError("Сначала подключите CAT по TCI.")
+                source = (rig.url, int(rig.receiver))
+            else:
+                source = self.inputs.get(self.settings["input"].get())
+                if not source:
+                    self.show_equipment()
+                    self.notify(messagebox.showwarning, "Приём", "Выберите аудиоустройство «Вход RX».",
+                                parent=self.equipment)
+                    return
         except ValueError as error:
             self.notify(messagebox.showwarning, "Приём", error_text(error), parent=self.root)
             return
         self.rx_running = True
+        self.rx_uses_tci = via_tci
         self.rx_stop.clear()
         self.rx_filter_updates = queue.SimpleQueue()
         self.update_rx_buttons()
-        self.rx_status.set("Открываю аудиовход…")
-        self.run("rx", radio.receive, device, settings, self.rx_stop, self.tx_active,
+        self.rx_status.set("Ожидание аудио RX по TCI…" if via_tci else "Открываю аудиовход…")
+        self.run("rx", radio.receive_tci if via_tci else radio.receive, source, settings, self.rx_stop, self.tx_active,
                  self.rx_filter_updates)
 
     def stop_rx(self):
@@ -1160,6 +1177,8 @@ class App:
                 if data and not self.closing:
                     self.notify(messagebox.showwarning, "CAT", data, parent=self.root)
             elif event == "cat_done":
+                if self.rx_uses_tci:
+                    self.stop_rx()
                 self.session = None
                 self.cat_ready = self.cat_writing = False
                 self.armed.set(False)
@@ -1180,11 +1199,14 @@ class App:
                 db, speed, key = data
                 self.level.set(max(0, min(60, db + 60)))
                 mark = Message(" · Тон") if key else ""
-                self.rx_status.set(Message("{db:.0f} дБFS · {speed:.1f} WPM{mark}", db=db, speed=speed, mark=mark))
+                self.rx_status.set(Message("{prefix}{db:.0f} дБFS · {speed:.1f} WPM{mark}",
+                                           prefix="TCI RX · " if self.rx_uses_tci else "",
+                                           db=db, speed=speed, mark=mark))
             elif event == "rx_started" and not self.rx_stop.is_set():
-                self.rx_status.set("Приём")
+                self.rx_status.set("Приём аудио по TCI" if self.rx_uses_tci else "Приём")
             elif event == "rx_done":
                 self.rx_running = False
+                self.rx_uses_tci = False
                 self.level.set(0)
                 self.update_rx_buttons()
                 self.rx_status.set("Ошибка аудиовхода" if data else "Приём остановлен")

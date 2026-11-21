@@ -8,7 +8,7 @@ Windows desktop workstation for receiving, decoding and transmitting Morse code.
 | --- | --- | --- |
 | Direct Xiegu G90 CI-V | G90/G90S with DE-19 | DE-19 USB audio and ACC |
 | Built-in Hamlib | Yaesu FT-891, Icom IC-7300, Kenwood TS-590SG and other [Hamlib backends](https://github.com/Hamlib/Hamlib/wiki/Supported-Radios) | Rig USB audio or a separate audio interface |
-| TCI over WebSocket | ExpertSDR3 with a SunSDR radio and compatible TCI servers | Windows sound device or virtual audio routing. TCI is used for control and telemetry. |
+| TCI over WebSocket | ExpertSDR3 with a SunSDR radio and compatible TCI servers | Direct TCI RX audio or a Windows input. Transmit audio uses a Windows output. |
 
 Frequency, mode, bands, VFO/channel, split and PTT follow the selected profile. Meter readings and optional commands depend on the device, server and firmware. Models listed under Hamlib are examples from Hamlib's supported-rig list. Hardware operation has yet to be verified for this release.
 
@@ -19,7 +19,7 @@ Frequency, mode, bands, VFO/channel, split and PTT follow the selected profile. 
 The top-right language selector switches between **Русский** and **English** immediately. The app remembers the choice. The **Alphabet** setting still controls which Morse alphabet is decoded.
 
 1. Download the `CW_Rig_Desk-*-windows-x64.exe` asset from the [latest release](https://github.com/wildwolfgolf/cw-rig-desk/releases/latest) and double-click it. The executable includes Python and Hamlib and runs without installation.
-2. Open **Equipment**. Select **RX input**, **TX output** and **CAT interface**.
+2. Open **Equipment**. Select the **CAT interface** and audio devices as needed. Direct TCI audio does not need an **RX input** device.
 3. Use **Connect CAT**, or **Connect** in the built-in Hamlib dialog. Turn the tuning knob and verify that the frequency follows. Select a CW tone and click **Start RX**. **Demo** runs the decoder on a generated signal with no hardware.
 4. To send, select the radio's upper-sideband audio/data mode and route the selected playback device to the radio input. Start at low power into a suitable dummy load. Enable **Enable TX**, then click **Send** or a macro. **Esc** stops the transmission. The app sends keyed audio tones under PTT in USB or upper-sideband data mode. The same transmit path is used for typed text and macros.
 
@@ -41,7 +41,11 @@ The Windows x64 executable includes Hamlib 4.7.2. Its corresponding source is av
 
 Start the SDR and enable TCI in ExpertSDR3. Use the endpoint shown in its settings, for example `ws://127.0.0.1:40001`. Select **TCI · WebSocket** and receiver **0** (first) or **1** (second). CW Rig Desk reads the server's state and follows its updates. VFO A/B selects the channel managed by this app for the chosen receiver.
 
-Route the SDR's receive audio to **RX input** using a sound device or a virtual audio cable. For TX, route the app's selected **TX output** to **Mic PC** in ExpertSDR. The app requests that source explicitly over TCI. Select USB or DIGU and channel A with SPLIT off. This desktop release uses Windows sound devices for audio. TCI binary audio streams and the native TCI CW keyer are separate features that are outside this implementation.
+Leave **Receive audio directly over TCI** enabled (the default). Connect CAT and click **Start RX** in the **CW receive** panel. **TCI RX** appears below the decoded text once audio packets arrive. If the server does not provide audio streaming, turn off this option, route the SDR audio to a virtual audio cable and select its recording endpoint under **RX input**.
+
+Set **Tone, Hz** to the CW pitch configured in your SDR. The decoder needs keyed dots, dashes and gaps to produce characters.
+
+To transmit, route **TX output** to **Mic PC** in ExpertSDR. Select USB or DIGU and channel A with SPLIT off.
 
 ### Direct G90
 

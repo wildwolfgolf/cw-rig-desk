@@ -1,5 +1,17 @@
 # История версий / Changelog
 
+## 1.2.0
+
+### Русский
+
+- «Запустить» принимает звук SDR по TCI и направляет его в декодер Морзе. Виртуальный кабель нужен только при выборе входа Windows.
+- Индикатор показывает, когда поступает звук TCI. Если сервер не отдаёт аудио, программа сообщает об этом отдельно от состояния CAT.
+
+### English
+
+- Start RX can feed SDR audio directly to the Morse decoder over TCI. A virtual cable is only needed when using the Windows input.
+- The receive status identifies TCI audio and reports a missing audio stream separately from CAT status.
+
 ## 1.1.0
 
 ### Русский

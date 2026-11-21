@@ -9,6 +9,8 @@ import time
 
 import serial
 
+from .localization import Message, error_text
+
 CAT_PC = 0xE0
 MODES = {
     "LSB": (0x00, 0), "USB": (0x01, 0), "U-D": (0x01, 1), "L-D": (0x00, 1),
@@ -146,7 +148,7 @@ class Civ:
                 if body.startswith(prefix) and len(body) >= len(prefix) + data_size:
                     return body[len(prefix):]
         code = bytes(payload).hex(" ").upper()
-        raise CivError(f"Нет ответа G90 на команду CAT {code}.")
+        raise CivError(Message("Нет ответа G90 на команду CAT {code}.", code=code))
 
     def query(self, command, *, timeout=0.21):
         return self.exchange(command, command, 1, timeout)
@@ -397,7 +399,7 @@ class CatSession:
                         self.publish("alc", None)
                         action(*args, self.rig, lambda: self.next_reading(TX_METERS, own_tx=True), self.report)
                     except Exception as error:
-                        self.report("tx_done", str(error))
+                        self.report("tx_done", error_text(error))
                     else:
                         self.report("tx_done", None)
                     finally:
@@ -408,7 +410,7 @@ class CatSession:
                     try:
                         self.write(job, arguments[0])
                     except (CivError, ValueError) as error:
-                        self.report("cat_write_done", str(error))
+                        self.report("cat_write_done", error_text(error))
                     else:
                         self.report("cat_write_done", None)
         finally:

@@ -1,5 +1,17 @@
 # История версий / Changelog
 
+## 1.1.0
+
+### Русский
+
+- В верхней панели можно переключать интерфейс между русским и английским без перезапуска. Выбор сохраняется.
+- Переведены настройки, телеметрия CAT, сообщения об ошибках и стандартные названия макросов. Алфавит декодера и пользовательские макросы настраиваются отдельно.
+
+### English
+
+- Switch between Russian and English from the top bar without restarting. The app remembers your choice.
+- Equipment settings, CAT telemetry, error messages and default macro names are translated. The decoder alphabet and custom macros are independent of the interface language.
+
 ## 1.0.0
 
 ### Русский

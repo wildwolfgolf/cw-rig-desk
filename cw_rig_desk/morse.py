@@ -4,6 +4,8 @@ import re
 
 import numpy as np
 
+from .localization import Message
+
 LATIN = dict(zip(
     "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
     ".- -... -.-. -.. . ..-. --. .... .. .--- -.- .-.. -- -. --- .--. --.- .-. ... - ..- ...- .-- -..- -.-- --.. "
@@ -32,9 +34,9 @@ def expand_macro(template, call, other, rst):
               "RST": rst.strip()}
     for name in re.findall(r"\{([^{}]+)\}", template):
         if name not in fields:
-            raise ValueError(f"Неизвестная подстановка {{{name}}}.")
+            raise ValueError(Message("Неизвестная подстановка {{{name}}}.", name=name))
         if not fields[name]:
-            raise ValueError(f"Заполните поле для {{{name}}}.")
+            raise ValueError(Message("Заполните поле для {{{name}}}.", name=name))
     return re.sub(r"\{([^{}]+)\}", lambda match: fields[match[1]], template)
 
 
@@ -45,7 +47,7 @@ def encode_text(text):
     tokens = [re.findall(r"<[^<>]+>|.", word) for word in words]
     unsupported = sorted({token for word in tokens for token in word} - ENCODE.keys())
     if unsupported:
-        raise ValueError(f"Нет кода для символов {' '.join(unsupported)}.")
+        raise ValueError(Message("Нет кода для символов {characters}.", characters=" ".join(unsupported)))
     return [[ENCODE[token] for token in word] for word in tokens]
 
 
@@ -67,7 +69,7 @@ def waveform(words, rate, wpm, pitch, gain, max_seconds=60):
     unit = 1.2 / wpm
     duration = unit * sum(units for _, units in segments)
     if duration > max_seconds:
-        raise ValueError(f"Сообщение занимает {duration:.0f} с. Максимум {max_seconds} с.")
+        raise ValueError(Message("Сообщение занимает {duration:.0f} с. Максимум {max_seconds} с.", duration=duration, max_seconds=max_seconds))
     result = np.zeros(round((duration + 0.09) * rate), dtype=np.float32)
     elapsed = 0
     for keyed, units in segments:

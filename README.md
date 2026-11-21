@@ -12,24 +12,26 @@ Windows desktop workstation for receiving, decoding and transmitting Morse code.
 
 Frequency, mode, bands, VFO/channel, split and PTT follow the selected profile. Meter readings and optional commands depend on the device, server and firmware. Models listed under Hamlib are examples from Hamlib's supported-rig list. Hardware operation has yet to be verified for this release.
 
-![CW Rig Desk main window with demo readings](docs/main-window.png)
+![CW Rig Desk main window with demo readings](docs/main-window-en.png)
 
 ## Quick start
 
+The top-right language selector switches between **Русский** and **English** immediately. The app remembers the choice. The **Alphabet** setting still controls which Morse alphabet is decoded.
+
 1. Download the `CW_Rig_Desk-*-windows-x64.exe` asset from the [latest release](https://github.com/wildwolfgolf/cw-rig-desk/releases/latest) and double-click it. The executable includes Python and Hamlib and runs without installation.
-2. Open **Оборудование** (Equipment). Select **Вход RX** (RX input), **Выход TX** (TX output) and **Интерфейс CAT** (CAT interface).
-3. Use **Подключить CAT** (Connect CAT), or **Подключить** (Connect) in the built-in Hamlib dialog. Turn the tuning knob and verify that the frequency follows. Select a CW tone and click **Запустить** (Start). **Демо** runs the decoder on a generated signal with no hardware.
-4. To send, select the radio's upper-sideband audio/data mode and route the selected playback device to the radio input. Start at low power into a suitable dummy load. Enable **Разрешить TX**, then click **Передать** (Send) or a macro. **Esc** stops the transmission. The app sends keyed audio tones under PTT in USB or upper-sideband data mode. The same transmit path is used for typed text and macros.
+2. Open **Equipment**. Select **RX input**, **TX output** and **CAT interface**.
+3. Use **Connect CAT**, or **Connect** in the built-in Hamlib dialog. Turn the tuning knob and verify that the frequency follows. Select a CW tone and click **Start RX**. **Demo** runs the decoder on a generated signal with no hardware.
+4. To send, select the radio's upper-sideband audio/data mode and route the selected playback device to the radio input. Start at low power into a suitable dummy load. Enable **Enable TX**, then click **Send** or a macro. **Esc** stops the transmission. The app sends keyed audio tones under PTT in USB or upper-sideband data mode. The same transmit path is used for typed text and macros.
 
 ## Connect a radio
 
 ### Built-in Hamlib
 
 1. Connect your radio's USB CAT cable and turn the radio on.
-2. Open **Оборудование** (Equipment), select **Hamlib · встроенный** (built-in), and choose your radio under **Модель** (Model). You can type part of its name to narrow the list.
-3. Click **Подключить** (Connect). CW Rig Desk starts and stops Hamlib automatically.
+2. Open **Equipment**, select **Hamlib · built-in**, and choose your radio under **Model**. You can type part of its name to narrow the list.
+3. Click **Connect**. CW Rig Desk starts and stops Hamlib automatically.
 
-Leave **Порт CAT** (CAT port) and **Скорость CAT** (CAT speed) on **Авто** (Auto). The app can select a single USB serial port automatically or, for the FT-891, a uniquely identified Silicon Labs Enhanced port. If the app cannot identify the port, use the CAT port shown in Windows Device Manager. If the radio uses a different CAT speed from the Hamlib default, select the speed from the radio's menu. Release the port if another program has it open.
+Leave **CAT port** and **CAT baud rate** on **Auto**. The app can select a single USB serial port automatically or, for the FT-891, a uniquely identified Silicon Labs Enhanced port. If the app cannot identify the port, use the CAT port shown in Windows Device Manager. If the radio uses a different CAT speed from the Hamlib default, select the speed from the radio's menu. Release the port if another program has it open.
 
 Select the RX and TX audio devices separately. For example, an FT-891 typically uses an audio interface connected to its DATA port.
 
@@ -39,7 +41,7 @@ The Windows x64 executable includes Hamlib 4.7.2. Its corresponding source is av
 
 Start the SDR and enable TCI in ExpertSDR3. Use the endpoint shown in its settings, for example `ws://127.0.0.1:40001`. Select **TCI · WebSocket** and receiver **0** (first) or **1** (second). CW Rig Desk reads the server's state and follows its updates. VFO A/B selects the channel managed by this app for the chosen receiver.
 
-Route the SDR's receive audio to **Вход RX** using a sound device or a virtual audio cable. For TX, route the app's selected **Выход TX** to **Mic PC** in ExpertSDR. The app requests that source explicitly over TCI. Select USB or DIGU and channel A with SPLIT off. This desktop release uses Windows sound devices for audio. TCI binary audio streams and the native TCI CW keyer are separate features that are outside this implementation.
+Route the SDR's receive audio to **RX input** using a sound device or a virtual audio cable. For TX, route the app's selected **TX output** to **Mic PC** in ExpertSDR. The app requests that source explicitly over TCI. Select USB or DIGU and channel A with SPLIT off. This desktop release uses Windows sound devices for audio. TCI binary audio streams and the native TCI CW keyer are separate features that are outside this implementation.
 
 ### Direct G90
 

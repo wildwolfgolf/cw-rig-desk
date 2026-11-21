@@ -1,25 +1,58 @@
 """Smoke test for the actual standalone executable on Windows CI."""
 
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from threading import Event
 from traceback import format_exc
 import tkinter as tk
 
-from . import __version__, hamlib_runtime, radio
-from .app import App
+from . import __version__, app, hamlib_runtime, radio
+from .app import App, load_settings
+
+
+def check_languages(gui):
+    gui.settings["alphabet"].set("RUS")
+    gui.tx_text.insert("1.0", "CQ TEST")
+    gui.update_reading("frequency", 7_030_000)
+    gui.show_details()
+    gui.language_selector.current(1)
+    gui.language_selector.event_generate("<<ComboboxSelected>>")
+    gui.root.update()
+    if (gui.equipment.title() != "Equipment" or gui.cat_button["text"] != "Connect CAT"
+            or gui.cat_table.set("frequency", "label") != "Active VFO frequency"
+            or gui.cat_table.set("frequency", "value") != "7 030 000 Hz"
+            or gui.macro_buttons[1]["text"] != "Reply"
+            or "Hamlib · built-in" not in gui.profile_selector["values"]
+            or gui.hamlib_baud.get() != "Auto"
+            or gui.settings["alphabet"].get() != "RUS"
+            or gui.tx_text.get("1.0", "end-1c") != "CQ TEST"
+            or load_settings()["language"] != "en"):
+        raise RuntimeError("English interface switch did not update controls or preserve state")
+    gui.language_selector.current(0)
+    gui.language_selector.event_generate("<<ComboboxSelected>>")
+    gui.root.update()
+    if gui.equipment.title() != "Оборудование" or gui.macro_buttons[1]["text"] != "Ответ":
+        raise RuntimeError("Could not switch the interface back to Russian")
+    gui.settings["alphabet"].set("LAT")
+    gui.close_details()
 
 
 def run(report_path):
     report = Path(report_path)
     root = None
+    settings_dir = TemporaryDirectory()
+    original_paths = app.CONFIG, app.LEGACY_CONFIG
+    app.CONFIG = Path(settings_dir.name) / "settings.json"
+    app.LEGACY_CONFIG = Path(settings_dir.name) / "legacy.json"
     try:
         root = tk.Tk()
         gui = App(root)
         root.update()
         if __version__ not in root.title():
             raise RuntimeError("Missing version in window title")
-        if gui.rx_status.get().startswith("Ошибка списка устройств"):
+        if gui.rx_status.source.startswith("Ошибка списка устройств"):
             raise RuntimeError(gui.rx_status.get())
+        check_languages(gui)
         audio, _ = radio.sd.get_portaudio_version()
         if not audio:
             raise RuntimeError("PortAudio failed to load")
@@ -54,6 +87,8 @@ def run(report_path):
     finally:
         if root is not None:
             root.destroy()
-    report.write_text(f"CW Rig Desk {__version__}: Tk, PortAudio, CW decoder and Hamlib Dummy OK\n",
+        app.CONFIG, app.LEGACY_CONFIG = original_paths
+        settings_dir.cleanup()
+    report.write_text(f"CW Rig Desk {__version__}: Tk, RU/EN switch, PortAudio, CW decoder and Hamlib Dummy OK\n",
                       encoding="utf-8")
     return 0

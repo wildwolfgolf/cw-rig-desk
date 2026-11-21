@@ -6,6 +6,8 @@ import queue
 import socket
 import time
 
+from .localization import Message, error_text
+
 G90_PROFILE = "Xiegu G90 · CI-V"
 LOCAL_HAMLIB_PROFILE = "Hamlib · встроенный"
 REMOTE_HAMLIB_PROFILE = "Hamlib · rigctld"
@@ -97,7 +99,7 @@ class Hamlib:
     def value(self, command):
         response = self.request(command)
         if not response:
-            raise CommandError(f"Hamlib · {command}: пустой ответ.")
+            raise CommandError(Message("Hamlib · {command}: пустой ответ.", command=command))
         return next(iter(response.values()))
 
     def frequency(self):
@@ -169,7 +171,7 @@ class Hamlib:
             observed = self.frequency()
             self.publish("frequency", observed)
             if observed != value:
-                raise CommandError(f"Hamlib вернул частоту {observed} Гц.")
+                raise CommandError(Message("Hamlib вернул частоту {observed} Гц.", observed=observed))
         elif key == "mode":
             self.request(f"set_mode {self.mode_names.get(value, value)} 0")
             self.get_mode()
@@ -348,7 +350,7 @@ class Tci:
         elif key == "mode":
             name = self.mode_names.get(value, value)
             if self.modes and name not in self.modes:
-                raise CommandError(f"Сервер TCI не поддерживает режим {name}.")
+                raise CommandError(Message("Сервер TCI не поддерживает режим {name}.", name=name))
             self.exchange(f"modulation:{rx},{name};", "modulation", name)
         elif key == "vfo":
             new = str(value)
@@ -442,7 +444,7 @@ class NetworkSession:
                     try:
                         action(*arguments, self, lambda: self.driver.sync(during_tx=True), self.report)
                     except Exception as error:
-                        self.report("tx_done", str(error))
+                        self.report("tx_done", error_text(error))
                     else:
                         self.report("tx_done", None)
                     last = self.values.get("swr_live")
@@ -452,7 +454,7 @@ class NetworkSession:
                     try:
                         self.driver.write(job, args[0])
                     except (CommandError, ValueError) as error:
-                        self.report("cat_write_done", str(error))
+                        self.report("cat_write_done", error_text(error))
                     else:
                         self.report("cat_write_done", None)
         finally:

@@ -13,6 +13,7 @@ import time
 from urllib.request import urlopen
 from zipfile import ZipFile
 
+from .localization import Message, error_text
 from .network_cat import Hamlib
 
 VERSION = "4.7.2"
@@ -128,7 +129,7 @@ def catalog(bin_dir):
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10, creationflags=windows_flags(),
         )
     except (OSError, subprocess.SubprocessError) as error:
-        raise RuntimeError(f"Не удалось прочитать список моделей Hamlib: {error}") from error
+        raise RuntimeError(Message("Не удалось прочитать список моделей Hamlib: {error}", error=error_text(error))) from error
     models = parse_models(result.stdout.decode("utf-8", errors="replace"))
     if not models:
         raise RuntimeError("Hamlib вернул пустой список моделей.")
@@ -141,7 +142,7 @@ def resolve_serial(model_id, selected, devices):
     if selected != AUTO:
         if any(item.device == selected for item in devices):
             return selected
-        raise ValueError(f"Порт {selected} недоступен. Проверьте подключение CAT.")
+        raise ValueError(Message("Порт {selected} недоступен. Проверьте подключение CAT.", selected=selected))
     usb = [item for item in devices if item.vid is not None]
     if model_id == 1036:
         # The FT-891's dual Silicon Labs interface uses Enhanced for CAT.
@@ -206,7 +207,7 @@ class ManagedHamlib(Hamlib):
             return
         self.stderr.seek(max(0, self.stderr.seek(0, os.SEEK_END) - 1600))
         detail = self.stderr.read().decode("utf-8", errors="replace").strip()
-        raise ConnectionError(f"Hamlib не запустил CAT для выбранной модели. {detail}".rstrip())
+        raise ConnectionError(Message("Hamlib не запустил CAT для выбранной модели.{detail}", detail=f" {detail}" if detail else ""))
 
     def recover(self):
         # Keep the same rigctld instance so a lost TCP reply cannot leave TX active.

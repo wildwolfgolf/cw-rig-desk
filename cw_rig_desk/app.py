@@ -12,6 +12,7 @@ from tkinter import messagebox, ttk
 
 from serial.tools import list_ports
 
+from . import __version__
 from . import cat as civ, hamlib_runtime as bundled, network_cat as network, radio, ui_theme as theme
 from .morse import encode_text, expand_macro
 
@@ -131,7 +132,7 @@ class App:
         self.swr_note = tk.StringVar(root)
         self.mono_font = theme.configure(root)
 
-        root.title("CW Rig Desk — приём и передача Морзе")
+        root.title(f"CW Rig Desk {__version__} — приём и передача Морзе")
         root.minsize(1010, 710)
         root.geometry("1180x780")
         root.protocol("WM_DELETE_WINDOW", self.close)
@@ -155,7 +156,7 @@ class App:
         header.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 13))
         title = ttk.Frame(header, style="Page.TFrame")
         title.pack(side="left")
-        ttk.Label(title, text="CW Rig Desk", style="Brand.TLabel").pack(anchor="w")
+        ttk.Label(title, text=f"CW Rig Desk {__version__}", style="Brand.TLabel").pack(anchor="w")
         ttk.Label(title, textvariable=self.settings["profile"], style="PageNote.TLabel").pack(anchor="w")
         ttk.Button(header, text="Оборудование", command=self.show_equipment).pack(side="right")
         ttk.Button(header, text="Телеметрия CAT", command=self.show_details).pack(

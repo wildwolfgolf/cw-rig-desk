@@ -1,0 +1,5 @@
+numpy==2.2.6
+sounddevice==0.5.3
+pyserial==3.5
+websocket-client==1.8.0
+pyinstaller==6.20.0

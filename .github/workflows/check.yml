@@ -1,8 +1,9 @@
-name: Desktop tests
+name: Desktop tests and Windows release
 
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -25,23 +26,88 @@ jobs:
       - run: python -m pip install -r requirements.txt -r requirements-test.txt
       - run: python -m unittest discover -s tests -v
 
-  portable-hamlib:
-    if: github.event_name != 'pull_request'
+  windows:
     runs-on: windows-latest
+    outputs:
+      version: ${{ steps.build.outputs.version }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - run: python -m tools.package_windows
-      - name: Test bundled rigctld and collect Windows archive
+          architecture: x64
+          cache: pip
+          cache-dependency-path: requirements-build.txt
+      - run: python -m pip install -r requirements-build.txt
+      - name: Build the standalone application
+        id: build
         shell: pwsh
         run: |
-          Expand-Archive dist/CW_Rig_Desk_Windows_x64.zip dist/smoke
-          $env:CW_TEST_RIGCTL_DIR = Join-Path (Resolve-Path dist/smoke) 'CW_Rig_Desk/vendor/hamlib-w64-4.7.2/bin'
-          python -m unittest discover -s tests -p test_hamlib_runtime.py -v
+          python -m tools.package_windows
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $version = python -c "from cw_rig_desk import __version__; print(__version__)"
+          "version=$version" >> $env:GITHUB_OUTPUT
+      - name: Launch only the EXE on Windows and exercise its embedded libraries
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ steps.build.outputs.version }}
+        run: |
+          $exe = Get-Item "dist/CW_Rig_Desk-$env:RELEASE_VERSION-windows-x64.exe"
+          if ($exe.VersionInfo.ProductVersion -ne $env:RELEASE_VERSION) {
+            throw "The Windows version resource does not match the release version"
+          }
+          $smoke = New-Item -ItemType Directory (Join-Path $env:RUNNER_TEMP 'cw-rig-desk-smoke')
+          $env:LOCALAPPDATA = Join-Path $smoke.FullName 'appdata'
+          $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+          Copy-Item $exe.FullName $smoke.FullName
+          $report = Join-Path $smoke.FullName 'result.txt'
+          $process = Start-Process (Join-Path $smoke.FullName $exe.Name) -ArgumentList "--self-test `"$report`"" -WorkingDirectory $smoke.FullName -PassThru
+          if (-not $process.WaitForExit(90000)) {
+            $process.Kill($true)
+            throw "Standalone self-test timed out"
+          }
+          if (Test-Path $report) { Get-Content $report -Encoding utf8 }
+          if ($process.ExitCode -ne 0 -or -not (Test-Path $report)) {
+            throw "Standalone self-test failed with exit code $($process.ExitCode)"
+          }
+          $sha = (Get-FileHash -LiteralPath $exe.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$sha  $($exe.Name)" | Set-Content "dist/$($exe.Name).sha256" -Encoding ascii
       - uses: actions/upload-artifact@v4
         with:
-          name: CW_Rig_Desk_Windows_x64
-          path: dist/CW_Rig_Desk_Windows_x64.zip
+          name: CW_Rig_Desk-${{ steps.build.outputs.version }}-windows-x64
+          path: |
+            dist/CW_Rig_Desk-*.exe
+            dist/CW_Rig_Desk-*.exe.sha256
+            dist/CW_Rig_Desk_User_Guide_RU.pdf
+            dist/hamlib-*.tar.gz
           if-no-files-found: error
+
+  release:
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: [tests, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: cw-rig-desk-release-${{ needs.windows.outputs.version }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: CW_Rig_Desk-${{ needs.windows.outputs.version }}-windows-x64
+          path: release
+      - name: Publish the tested executable
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.windows.outputs.version }}
+        run: |
+          set -euo pipefail
+          tag="v$VERSION"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "$tag already exists. Published versions are kept intact."
+            exit 0
+          fi
+          awk -v version="$VERSION" '$0 == "## " version { found=1; next } found && /^## / { exit } found { print }' CHANGELOG.md > release-notes.md
+          test -s release-notes.md
+          gh release create "$tag" release/* --target "$GITHUB_SHA" --title "CW Rig Desk $VERSION" --notes-file release-notes.md

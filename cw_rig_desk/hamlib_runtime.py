@@ -71,13 +71,18 @@ def install_binary_archive(archive, destination):
 def find_bin():
     if sys.platform != "win32":
         raise RuntimeError("Встроенная сборка Hamlib предназначена для Windows x64.")
-    stem = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parents[1]
+    frozen = getattr(sys, "frozen", False)
+    stem = Path(sys._MEIPASS) if frozen else Path(__file__).resolve().parents[1]
     bundle = f"hamlib-w64-{VERSION}"
     portable = stem / "vendor" / bundle / "bin"
+    if (portable / "rigctl.exe").is_file() and (portable / "rigctld.exe").is_file():
+        return portable
+    if frozen:
+        raise RuntimeError("В сборке отсутствуют файлы Hamlib. Скачайте выпуск CW Rig Desk заново.")
     cached = Path(os.getenv("LOCALAPPDATA") or Path.home()) / "CW_Rig_Desk" / "vendor"
-    for candidate in (portable, cached / bundle / "bin"):
-        if (candidate / "rigctl.exe").is_file() and (candidate / "rigctld.exe").is_file():
-            return candidate
+    cached_bin = cached / bundle / "bin"
+    if (cached_bin / "rigctl.exe").is_file() and (cached_bin / "rigctld.exe").is_file():
+        return cached_bin
     cached.mkdir(parents=True, exist_ok=True)
     # Separate staging keeps concurrent launches from seeing an incomplete package.
     with tempfile.TemporaryDirectory(dir=cached) as work:
@@ -89,7 +94,7 @@ def find_bin():
         except OSError:
             if not (cached / bundle / "bin" / "rigctld.exe").is_file():
                 raise
-    return cached / bundle / "bin"
+    return cached_bin
 
 
 @dataclass(frozen=True)

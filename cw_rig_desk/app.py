@@ -10,7 +10,9 @@ import tkinter as tk
 from urllib.parse import urlsplit
 from tkinter import messagebox, ttk
 
-from . import cat as civ, network_cat as network, radio, ui_theme as theme
+from serial.tools import list_ports
+
+from . import cat as civ, hamlib_runtime as bundled, network_cat as network, radio, ui_theme as theme
 from .morse import encode_text, expand_macro
 
 CONFIG = Path(os.getenv("LOCALAPPDATA") or Path.home()) / "CW_Rig_Desk" / "settings.json"
@@ -40,8 +42,9 @@ DEFAULTS = {
     "rx_wpm": "18", "tx_wpm": "18", "sensitivity": "-34", "level": "12",
     "lead": "250", "alphabet": "LAT", "adaptive": True, "cw_filter": "Выкл.",
     "call": "", "other": "", "rst": "599", "macros": DEFAULT_MACROS,
-    "profile": network.PROFILES[0], "hamlib_host": "127.0.0.1", "hamlib_port": "4532",
+    "profile": network.G90_PROFILE, "hamlib_host": "127.0.0.1", "hamlib_port": "4532",
     "tci_url": "ws://127.0.0.1:40001", "tci_receiver": "0",
+    "hamlib_model": "", "hamlib_device": bundled.AUTO, "hamlib_baud": bundled.AUTO,
 }
 
 
@@ -91,6 +94,10 @@ class App:
         self.cat_ready = False
         self.cat_writing = False
         self.cat_values = {}
+        self.hamlib_models = {}
+        self.hamlib_bin = None
+        self.hamlib_loading = False
+        self.hamlib_hint = tk.StringVar(root, value="")
         self.band_frequencies = {band: preset for band, _, _, preset in HF_BANDS}
         self.cat_log = deque(maxlen=800)
         self.details = None
@@ -411,6 +418,30 @@ class App:
         self.cat_address = ttk.Entry(serial, textvariable=self.settings["address"], width=6)
         self.cat_address.pack(side="left")
 
+        local = ttk.Frame(frame)
+        local.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        local.columnconfigure(1, weight=1)
+        ttk.Label(local, text="Модель", style="Hint.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 8))
+        self.hamlib_model = ttk.Combobox(local, textvariable=self.settings["hamlib_model"], width=39)
+        self.hamlib_model.grid(row=0, column=1, sticky="ew")
+        self.hamlib_model.bind("<KeyRelease>", self.filter_hamlib_models)
+        self.hamlib_model.bind("<<ComboboxSelected>>", self.filter_hamlib_models)
+        serial_options = ttk.Frame(local)
+        serial_options.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(7, 0))
+        ttk.Label(serial_options, text="Порт CAT", style="Hint.TLabel").pack(side="left", padx=(0, 7))
+        self.hamlib_device = ttk.Combobox(serial_options, textvariable=self.settings["hamlib_device"],
+                                          values=(bundled.AUTO,), width=9, state="readonly")
+        self.hamlib_device.pack(side="left")
+        ttk.Label(serial_options, text="Скорость CAT", style="Hint.TLabel").pack(side="left", padx=(12, 7))
+        self.hamlib_baud = ttk.Combobox(
+            serial_options, textvariable=self.settings["hamlib_baud"], width=8, state="readonly",
+            values=(bundled.AUTO, "1200", "2400", "4800", "9600", "19200", "38400", "57600", "115200", "230400"),
+        )
+        self.hamlib_baud.pack(side="left")
+        ttk.Label(local, textvariable=self.hamlib_hint, style="Hint.TLabel", wraplength=465).grid(
+            row=2, column=0, columnspan=2, sticky="w", pady=(6, 0)
+        )
+
         hamlib = ttk.Frame(frame)
         hamlib.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(8, 0))
         ttk.Label(hamlib, text="Хост rigctld", style="Hint.TLabel").pack(side="left")
@@ -430,11 +461,16 @@ class App:
                                          values=("0", "1"), width=3, state="readonly")
         self.tci_receiver.pack(side="left")
 
-        self.profile_panels = dict(zip(network.PROFILES, (serial, hamlib, tci)))
+        self.profile_panels = {
+            network.G90_PROFILE: serial, network.LOCAL_HAMLIB_PROFILE: local,
+            network.REMOTE_HAMLIB_PROFILE: hamlib, network.TCI_PROFILE: tci,
+        }
         footer = ttk.Frame(frame)
         footer.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(12, 0))
         ttk.Button(footer, text="Обновить устройства", command=self.refresh).pack(side="left")
-        ttk.Button(footer, text="Готово", style="Primary.TButton", command=dialog.withdraw).pack(side="right")
+        self.equipment_done = ttk.Button(footer, text="Готово", style="Primary.TButton",
+                                         command=self.finish_equipment)
+        self.equipment_done.pack(side="right")
         self.equipment = dialog
         self.profile_changed()
 
@@ -445,13 +481,43 @@ class App:
                 panel.grid()
             else:
                 panel.grid_remove()
-        modes = tuple(civ.MODES) if profile == network.PROFILES[0] else network.STANDARD_MODES
+        modes = tuple(civ.MODES) if profile == network.G90_PROFILE else network.STANDARD_MODES
         self.mode_picker.configure(values=modes)
         if self.mode_entry.get() not in modes:
             self.mode_entry.set("U-D")
         if self.details is not None:
             self.close_details()
         self.cat_log.clear()
+        if profile == network.LOCAL_HAMLIB_PROFILE and not (self.hamlib_models or self.hamlib_loading):
+            self.load_hamlib_catalog()
+        self.update_equipment_button()
+
+    def update_equipment_button(self):
+        connect = self.settings["profile"].get() == network.LOCAL_HAMLIB_PROFILE and self.session is None
+        self.equipment_done.configure(text="Подключить" if connect else "Готово",
+                                      state="disabled" if connect and self.hamlib_loading else "normal")
+
+    def finish_equipment(self):
+        self.equipment.withdraw()
+        if self.settings["profile"].get() == network.LOCAL_HAMLIB_PROFILE and self.session is None:
+            self.toggle_cat()
+
+    def load_hamlib_catalog(self):
+        self.hamlib_loading = True
+        self.hamlib_hint.set("Подготавливаю Hamlib и список моделей…")
+
+        def lookup(report):
+            location = bundled.find_bin()
+            report("hamlib_catalog", (location, bundled.catalog(location)))
+
+        self.run("hamlib_catalog", lookup)
+
+    def filter_hamlib_models(self, event=None):
+        needle = self.settings["hamlib_model"].get().strip().casefold()
+        if needle in {label.casefold() for label in self.hamlib_models}:
+            needle = ""
+        labels = [label for label in self.hamlib_models if needle in label.casefold()]
+        self.hamlib_model.configure(values=labels)
 
     def show_equipment(self):
         self.equipment.deiconify()
@@ -476,7 +542,7 @@ class App:
         readings = ttk.Frame(tabs)
         log = ttk.Frame(tabs)
         tabs.add(readings, text="Показания")
-        direct = self.settings["profile"].get() == network.PROFILES[0]
+        direct = self.settings["profile"].get() == network.G90_PROFILE
         tabs.add(log, text="Кадры CI-V" if direct else "Журнал соединения")
         columns = ("label", "value", "command") if direct else ("label", "value")
         self.cat_table = ttk.Treeview(readings, columns=columns, show="headings")
@@ -552,7 +618,7 @@ class App:
                 self.radio_state.configure(style="RadioBadge.TLabel")
         elif key == "smeter":
             self.draw_smeter()
-            if self.settings["profile"].get() == network.PROFILES[0]:
+            if self.settings["profile"].get() == network.G90_PROFILE:
                 self.signal_display.set(label)
         elif key == "signal":
             self.signal_display.set(label)
@@ -571,10 +637,11 @@ class App:
     def update_cat_buttons(self):
         configurable = self.session is None
         self.ports.configure(state="readonly" if configurable else "disabled")
-        for field in (self.cat_address, self.hamlib_host, self.hamlib_port, self.tci_url):
+        for field in (self.cat_address, self.hamlib_host, self.hamlib_port, self.tci_url, self.hamlib_model):
             field.configure(state="normal" if configurable else "disabled")
-        for field in (self.profile_selector, self.tci_receiver):
+        for field in (self.profile_selector, self.tci_receiver, self.hamlib_device, self.hamlib_baud):
             field.configure(state="readonly" if configurable else "disabled")
+        self.update_equipment_button()
         self.cat_button.configure(
             text="Подключить CAT" if configurable else "Отключить CAT",
             style="Primary.TButton" if configurable else "TButton",
@@ -604,7 +671,7 @@ class App:
             def report(kind, data):
                 self.events.put((kind, data))
 
-            if profile == network.PROFILES[0]:
+            if profile == network.G90_PROFILE:
                 port = self.settings["port"].get()
                 if port not in self.ports_found:
                     raise ValueError("Выберите COM-порт Xiegu G90.")
@@ -615,7 +682,25 @@ class App:
                 except ValueError:
                     raise ValueError("Введите адрес CI-V в hex, например 70 или 88.") from None
                 self.session = civ.CatSession(port, address, report)
-            elif profile == network.PROFILES[1]:
+            elif profile == network.LOCAL_HAMLIB_PROFILE:
+                if not self.hamlib_models:
+                    if not self.hamlib_loading:
+                        self.load_hamlib_catalog()
+                    raise ValueError("Дождитесь загрузки списка моделей Hamlib.")
+                label = self.settings["hamlib_model"].get().strip()
+                model = self.hamlib_models.get(label)
+                if model is None:
+                    raise ValueError("Выберите модель трансивера из списка Hamlib.")
+                port = bundled.resolve_serial(model.id, self.settings["hamlib_device"].get(), list_ports.comports())
+                speed = self.settings["hamlib_baud"].get()
+                baud = None if speed == bundled.AUTO else self.read_number("hamlib_baud", "Скорость CAT", 1, 1_000_000)
+                self.session = network.NetworkSession(
+                    lambda publish, log: bundled.ManagedHamlib(
+                        self.hamlib_bin / "rigctld.exe", model.id, port, baud, publish, log, self.cat_stop
+                    ),
+                    f"Hamlib · {model.name}" + (f" / {port}" if port else ""), report,
+                )
+            elif profile == network.REMOTE_HAMLIB_PROFILE:
                 host = self.settings["hamlib_host"].get().strip()
                 port = self.read_number("hamlib_port", "Порт rigctld", 1, 65535)
                 if not host or any(ch.isspace() or ch in "/@" for ch in host):
@@ -648,12 +733,12 @@ class App:
     def set_frequency(self):
         try:
             value = int(self.frequency_entry.get().replace(" ", ""))
-            if self.settings["profile"].get() == network.PROFILES[0]:
+            if self.settings["profile"].get() == network.G90_PROFILE:
                 civ.frequency_field(value)
             elif not 1 <= value <= 99_999_999_999:
                 raise ValueError
         except ValueError:
-            direct = self.settings["profile"].get() == network.PROFILES[0]
+            direct = self.settings["profile"].get() == network.G90_PROFILE
             text = ("Введите частоту в Гц от 500 000 до 30 000 000." if direct
                     else "Введите положительную целую частоту в Гц.")
             messagebox.showwarning("CAT", text, parent=self.root)
@@ -711,6 +796,7 @@ class App:
         choices = [("input", self.rx_devices, self.inputs), ("output", self.tx_devices, self.outputs)]
         if self.session is None:
             choices.append(("port", self.ports, ports))
+            self.hamlib_device.configure(values=(bundled.AUTO, *ports))
         for key, widget, values in choices:
             widget.configure(values=tuple(values))
             if self.settings[key].get() not in values:
@@ -925,6 +1011,16 @@ class App:
                 break
             if event == "cat_frame":
                 self.add_frame(data)
+            elif event == "hamlib_catalog":
+                self.hamlib_bin, models = data
+                self.hamlib_models = {model.label: model for model in models}
+                self.filter_hamlib_models()
+                self.hamlib_hint.set("Выберите модель. Порт и скорость можно оставить в режиме «Авто».")
+            elif event == "hamlib_catalog_done":
+                self.hamlib_loading = False
+                if data:
+                    self.hamlib_hint.set(data)
+                self.update_equipment_button()
             elif event == "cat_ready" and not self.closing and not self.cat_stop.is_set():
                 self.cat_ready = True
                 self.cat_link = data

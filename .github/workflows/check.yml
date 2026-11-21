@@ -24,3 +24,24 @@ jobs:
             requirements-test.txt
       - run: python -m pip install -r requirements.txt -r requirements-test.txt
       - run: python -m unittest discover -s tests -v
+
+  portable-hamlib:
+    if: github.event_name != 'pull_request'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python -m tools.package_windows
+      - name: Test bundled rigctld and collect Windows archive
+        shell: pwsh
+        run: |
+          Expand-Archive dist/CW_Rig_Desk_Windows_x64.zip dist/smoke
+          $env:CW_TEST_RIGCTL_DIR = Join-Path (Resolve-Path dist/smoke) 'CW_Rig_Desk/vendor/hamlib-w64-4.7.2/bin'
+          python -m unittest discover -s tests -p test_hamlib_runtime.py -v
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CW_Rig_Desk_Windows_x64
+          path: dist/CW_Rig_Desk_Windows_x64.zip
+          if-no-files-found: error

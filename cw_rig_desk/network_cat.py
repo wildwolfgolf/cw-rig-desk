@@ -6,7 +6,11 @@ import queue
 import socket
 import time
 
-PROFILES = ("Xiegu G90 · CI-V", "Hamlib · rigctld", "TCI · WebSocket")
+G90_PROFILE = "Xiegu G90 · CI-V"
+LOCAL_HAMLIB_PROFILE = "Hamlib · встроенный"
+REMOTE_HAMLIB_PROFILE = "Hamlib · rigctld"
+TCI_PROFILE = "TCI · WebSocket"
+PROFILES = (G90_PROFILE, LOCAL_HAMLIB_PROFILE, REMOTE_HAMLIB_PROFILE, TCI_PROFILE)
 STANDARD_MODES = ("LSB", "USB", "U-D", "L-D", "CW", "CWR", "AM", "NFM", "FM")
 NETWORK_READINGS = (
     ("frequency", "Частота"), ("other_frequency", "Частота второго канала"),
@@ -423,6 +427,8 @@ class NetworkSession:
     def run(self, stop):
         try:
             self.driver.open()
+            if stop.is_set():
+                return
             self.driver.init_state(stop)
             self.report("cat_ready", self.label)
             while not stop.is_set():

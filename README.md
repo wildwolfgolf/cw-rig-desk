@@ -7,7 +7,7 @@ Windows desktop workstation for receiving, decoding and transmitting Morse code.
 | Connection | Typical equipment | How audio is routed |
 | --- | --- | --- |
 | Direct Xiegu G90 CI-V | G90/G90S with DE-19 | DE-19 USB audio and ACC |
-| Hamlib rigctld | Yaesu FT-891, Icom IC-7300, Kenwood TS-590SG and other [Hamlib backends](https://github.com/Hamlib/Hamlib/wiki/Supported-Radios) | Rig USB audio or a separate audio interface |
+| Built-in Hamlib | Yaesu FT-891, Icom IC-7300, Kenwood TS-590SG and other [Hamlib backends](https://github.com/Hamlib/Hamlib/wiki/Supported-Radios) | Rig USB audio or a separate audio interface |
 | TCI over WebSocket | ExpertSDR3 with a SunSDR radio and compatible TCI servers | Windows sound device or virtual audio routing. TCI is used for control and telemetry. |
 
 Frequency, mode, bands, VFO/channel, split and PTT follow the selected profile. Meter readings and optional commands depend on the device, server and firmware. Models listed under Hamlib are examples from Hamlib's supported-rig list. Hardware operation has yet to be verified for this release.
@@ -16,23 +16,25 @@ Frequency, mode, bands, VFO/channel, split and PTT follow the selected profile. 
 
 ## Quick start
 
-1. Install Python 3.12 or 3.13 for Windows with Tcl/Tk. Extract the archive or clone the repository.
+1. Install Python 3.12 or 3.13 for Windows with Tcl/Tk. Extract the [Windows x64 package](https://github.com/wildwolfgolf/cw-rig-desk/actions/workflows/check.yml) from the latest successful run or clone the repository.
 2. Run `start_windows.bat`. It creates a local environment and installs dependencies at first launch. You can also run `python -m cw_rig_desk` after installing `requirements.txt`.
 3. Open **Оборудование** (Equipment). Select **Вход RX** (RX input), **Выход TX** (TX output) and **Интерфейс CAT** (CAT interface).
-4. Use **Подключить CAT** (Connect CAT). Turn the tuning knob and verify that the frequency follows. Select a CW tone and click **Запустить** (Start). **Демо** runs the decoder on a generated signal with no hardware.
+4. Use **Подключить CAT** (Connect CAT), or **Подключить** (Connect) in the built-in Hamlib dialog. Turn the tuning knob and verify that the frequency follows. Select a CW tone and click **Запустить** (Start). **Демо** runs the decoder on a generated signal with no hardware.
 5. To send, select the radio's upper-sideband audio/data mode and route the selected playback device to the radio input. Start at low power into a suitable dummy load. Enable **Разрешить TX**, then click **Передать** (Send) or a macro. **Esc** stops the transmission. The app sends keyed audio tones under PTT in USB or upper-sideband data mode. The same transmit path is used for typed text and macros.
 
 ## Connect a radio
 
-### Hamlib
+### Built-in Hamlib
 
-Install [Hamlib](https://github.com/Hamlib/Hamlib/releases) separately. Find the exact model ID with `rigctl.exe -l`. Close other programs that directly own the COM port. In PowerShell, run a command like this, substituting the CAT port and the speed configured on your radio:
+1. Connect your radio's USB CAT cable and turn the radio on.
+2. Open **Оборудование** (Equipment), select **Hamlib · встроенный** (built-in), and choose your radio under **Модель** (Model). You can type part of its name to narrow the list.
+3. Click **Подключить** (Connect). CW Rig Desk starts and stops Hamlib automatically.
 
-```powershell
-rigctld.exe -m 1036 -r COM5 -s 38400 -P RIG -T 127.0.0.1 -t 4532
-```
+Leave **Порт CAT** (CAT port) and **Скорость CAT** (CAT speed) on **Авто** (Auto). The app can select a single USB serial port automatically or, for the FT-891, a uniquely identified Silicon Labs Enhanced port. If the app cannot identify the port, use the CAT port shown in Windows Device Manager. If the radio uses a different CAT speed from the Hamlib default, select the speed from the radio's menu. Release the port if another program has it open.
 
-In this example, **1036** is the Yaesu FT-891. **3073** is the Icom IC-7300 and **2037** the Kenwood TS-590SG. Use the actual model ID for your rig. Do not pass `-o` (rigctld VFO mode). Use the loopback address for a local server. Choose **Hamlib · rigctld**, host `127.0.0.1`, port `4532`, and set up the rig's audio separately. For example, an FT-891 station uses a separate audio interface connected to the radio's DATA port.
+Select the RX and TX audio devices separately. For example, an FT-891 typically uses an audio interface connected to its DATA port.
+
+The Windows x64 package includes Hamlib 4.7.2 and its corresponding source archive. If you run from a Git checkout, CW Rig Desk fetches and verifies the official runtime the first time you select the built-in profile. To connect to an existing Hamlib server, choose **Hamlib · rigctld** and enter its host and port.
 
 ### TCI
 
@@ -51,6 +53,6 @@ python -m pip install -r requirements.txt -r requirements-test.txt
 python -m unittest discover -s tests -v
 ```
 
-The automated tests use local TCP and WebSocket simulators and synthetic CW audio. GitHub Actions runs them on Windows with Python 3.12 and 3.13 after the project is pushed.
+The automated tests use local TCP and WebSocket simulators and synthetic CW audio. GitHub Actions runs them on Windows with Python 3.12 and 3.13 and tests the packaged Hamlib runtime using its Dummy driver.
 
 References for the connection design: [WSJT-X setup guide](https://wsjt.sourceforge.io/wsjtx-main_en.html) · [FT8CN](https://github.com/N0BOY/FT8CN) · [Hamlib rigctld protocol](https://manpages.debian.org/trixie/libhamlib-utils/rigctld.1.en.html) · [ExpertSDR TCI specification](https://github.com/ExpertSDR3/TCI).

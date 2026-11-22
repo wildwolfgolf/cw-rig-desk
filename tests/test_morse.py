@@ -7,6 +7,27 @@ from cw_rig_desk.morse import DECODE, AudioSpectrum, CwBandpass, PitchTracker, T
 
 
 class MorseTests(unittest.TestCase):
+    def test_loud_filtered_tci_audio_at_28_wpm(self):
+        rate, pitch = 8000, 691
+        expected = "RZ9L RZ9L TEST CQ RZ9L 5NN 73 RZ9L TEST"
+        data = waveform(encode_text(expected), rate, 28, pitch, 0.88)
+        data = CwBandpass(rate, pitch, 100).feed(data)
+        data += np.random.default_rng(301).normal(0, 0.006, data.size).astype(np.float32)
+        samples = np.pad(data, (rate // 3, rate)).clip(-1, 1)
+        decoder = ToneDecoder(rate, pitch, "LAT", 18, -34, auto_gain=True, bayesian=True)
+        result = "".join(decoder.feed(samples[i:i + 173]) for i in range(0, samples.size, 173))
+        self.assertEqual(result.strip(), expected)
+
+    def test_bayesian_speed_recovers_even_when_initial_symbols_are_rejected(self):
+        rate, pitch = 8000, 691
+        phrase = "RZ9L RZ9L TEST CQ RZ9L 5NN 73 RZ9L TEST"
+        data = waveform(encode_text(phrase), rate, 34, pitch, 0.88)
+        samples = np.pad(data, (rate // 3, rate))
+        decoder = ToneDecoder(rate, pitch, "LAT", 18, -34, auto_gain=True, bayesian=True)
+        result = "".join(decoder.feed(samples[i:i + 173]) for i in range(0, samples.size, 173))
+        self.assertTrue(result.strip().endswith("RZ9L TEST CQ RZ9L 5NN 73 RZ9L TEST"), result)
+        self.assertGreater(1.2 / decoder.timing.dot, 28)
+
     def test_bayesian_decoder_compares_whole_symbol_when_dashes_are_short(self):
         rate = 8000
         dot = 1.2 / 18

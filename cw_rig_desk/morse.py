@@ -91,6 +91,45 @@ def waveform(words, rate, wpm, pitch, gain, max_seconds=60):
     return result
 
 
+class KeySpeed:
+    """Estimate tempo from complete key cycles, independent of decoded text."""
+
+    DOTS = np.linspace(0.028, 0.200, 173)[:, None, None]
+    MARKS = np.array([1, 1, 1, 3, 3, 3])
+    GAPS = np.array([1, 3, 7, 1, 3, 7])
+
+    def __init__(self):
+        self.cycles = deque(maxlen=16)
+        self.observed = 0
+
+    def observe(self, mark, gap, current):
+        if not (0.016 <= mark <= 0.55 and 0.014 <= gap <= 0.24):
+            return None
+        self.cycles.append((mark, gap))
+        self.observed += 1
+        if len(self.cycles) < 8 or self.observed % 4:
+            return None
+        mark, gap = np.asarray(self.cycles).T[:, None, :, None]
+        dots = self.DOTS
+        # The envelope detector can stretch marks and shorten spaces.
+        # The complete cycle is insensitive to this edge displacement.
+        mark_error = (mark - dots * self.MARKS - 0.005) / (0.008 + 0.25 * dots)
+        gap_error = (gap - dots * self.GAPS + 0.005) / (0.008 + 0.27 * dots)
+        cycle_error = (mark + gap - dots * (self.MARKS + self.GAPS)) / (0.012 + 0.30 * dots)
+        fits = 0.35 * mark_error ** 2 + 0.35 * gap_error ** 2 + 0.30 * cycle_error ** 2
+        loss = np.minimum(fits.min(axis=2), 4).mean(axis=1)
+        score = loss + 0.08 * np.abs(np.log(dots[:, 0, 0] / current))
+        best = int(np.argmin(score))
+        estimate = float(dots[best, 0, 0])
+        nearest = int(np.abs(dots[:, 0, 0] - current).argmin())
+        labels = self.MARKS[fits[best].argmin(axis=1)]
+        if (abs(np.log(estimate / current)) >= 0.16 and loss[best] < 0.9
+                and loss[nearest] - loss[best] >= 0.28
+                and np.count_nonzero(labels == 1) >= 2 and np.count_nonzero(labels == 3) >= 2):
+            return estimate
+        return None
+
+
 class MorseTiming:
     """Classify keyed runs and delimit letters and words during a pause."""
 
@@ -109,6 +148,8 @@ class MorseTiming:
         self.gaps = []
         self.mark_gap = 0.0
         self.start_uncertainty = 0.0
+        self.speed = KeySpeed() if adaptive else None
+        self.last_mark = 0.0
 
     def track_dot(self, age, mark):
         candidate = age / (3 if mark == "-" else 1)
@@ -131,6 +172,7 @@ class MorseTiming:
         age = time - self.started
         result = ""
         if self.on and not on:
+            self.last_mark = age
             if 0.43 * self.dot <= age <= 5.4 * self.dot:
                 mark = "-" if age >= 1.9 * self.dot else "."
                 if self.symbol_model is None:
@@ -155,6 +197,11 @@ class MorseTiming:
                 self.word_written = True
 
         if self.on != on:
+            if on and self.speed is not None:
+                estimate = self.speed.observe(self.last_mark, age, self.dot)
+                if estimate is not None:
+                    self.dot_estimates.clear()
+                    self.dot = estimate
             if on and self.symbol_model is not None:
                 self.start_uncertainty = uncertainty
                 self.mark_gap = age if self.pattern else 0.0
@@ -346,7 +393,11 @@ class ToneDecoder:
             self.noise_floor += 0.055 * (signal - self.noise_floor)
         elif not self.key_down and self.streak == 0:
             self.noise_floor += 0.015 * (signal - self.noise_floor)
-        threshold = max(self.threshold / self.gain, 3.0 * self.noise_floor, 2.55 * guard)
+        # Keep the key detector above the filter's low-level ringing when
+        # SDR audio is already loud. Quiet streams still use noise and gain.
+        loud_signal_floor = 0.16 * self.peak if self.peak > 0.25 else 0.0
+        threshold = max(self.threshold / self.gain, 3.0 * self.noise_floor, 2.55 * guard,
+                        loud_signal_floor)
         threshold *= 0.80 if self.key_down else 1.0
         tone = signal >= threshold
         if self.timing.symbol_model is not None and tone != self.key_down and not self.streak:

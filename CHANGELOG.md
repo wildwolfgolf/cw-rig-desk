@@ -1,5 +1,17 @@
 # История версий / Changelog
 
+## 1.4.1
+
+### Русский
+
+- Подстройка скорости использует длительности посылок и пауз даже при ошибках распознавания символов.
+- На громком TCI-аудио детектор меньше реагирует на затухающий хвост CW-фильтра, который может скрывать короткие паузы.
+
+### English
+
+- Speed tracking uses mark and gap durations even when symbol recognition fails.
+- On loud TCI audio, lingering filter ringing is less likely to obscure short key-up gaps.
+
 ## 1.4.0
 
 ### Русский

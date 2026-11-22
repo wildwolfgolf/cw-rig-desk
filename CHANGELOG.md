@@ -1,5 +1,17 @@
 # История версий / Changelog
 
+## 1.4.0
+
+### Русский
+
+- В панели «Приём CW» появилась галочка «Байесовский декодер». Режим оценивает варианты целого символа по длительности посылок и пауз.
+- Галочка по умолчанию выключена. Выбор сохраняется между запусками и применяется при следующем запуске приёма.
+
+### English
+
+- The CW receive panel now has a Bayesian decoder checkbox. The mode scores symbol candidates using measured marks and gaps.
+- The checkbox is off by default. The selection is saved and applies the next time reception starts.
+
 ## 1.3.2
 
 ### Русский

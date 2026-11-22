@@ -35,6 +35,7 @@ ENGLISH = {
     "Очистить": "Clear",
     "Подстройка скорости": "Track speed",
     "Авто тон": "Auto tone",
+    "Байесовский декодер": "Bayesian decoder",
     "Передача CW": "CW transmit",
     "Изменить макросы": "Edit macros",
     "Мой позывной": "My callsign",

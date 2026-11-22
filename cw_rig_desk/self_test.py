@@ -61,10 +61,21 @@ def run(report_path):
         audio, _ = radio.sd.get_portaudio_version()
         if not audio:
             raise RuntimeError("PortAudio failed to load")
-        demo = []
-        radio.demo(gui.rx_settings(), lambda _, result: demo.append(result))
-        if not demo or demo[0][0] != demo[0][1]:
-            raise RuntimeError("Demo CW decoding failed")
+        for bayesian in (False, True):
+            rx = gui.rx_settings()
+            if rx["bayesian"] != bayesian:
+                raise RuntimeError("Bayesian decoder checkbox did not update receive settings")
+            if bayesian:
+                gui.save_settings()
+                if not load_settings()["bayesian"]:
+                    raise RuntimeError("Bayesian decoder setting was not saved")
+            for alphabet in ("LAT", "RUS"):
+                rx["alphabet"] = alphabet
+                demo = []
+                radio.demo(rx, lambda _, result: demo.append(result))
+                if not demo or demo[0][0] != demo[0][1]:
+                    raise RuntimeError(f"Demo CW decoding failed: {alphabet}, Bayesian={bayesian}")
+            gui.bayesian_choice.invoke()
 
         hamlib = hamlib_runtime.find_bin()
         models = {model.id for model in hamlib_runtime.catalog(hamlib)}
@@ -94,6 +105,6 @@ def run(report_path):
             root.destroy()
         app.CONFIG, app.LEGACY_CONFIG = original_paths
         settings_dir.cleanup()
-    report.write_text(f"CW Rig Desk {__version__}: Tk, RU/EN switch, PortAudio, CW decoder and Hamlib Dummy OK\n",
+    report.write_text(f"CW Rig Desk {__version__}: Tk, RU/EN switch, PortAudio, both CW decoders and Hamlib Dummy OK\n",
                       encoding="utf-8")
     return 0

@@ -23,6 +23,10 @@ The top-right language selector switches between **Русский** and **Englis
 3. Use **Connect CAT**, or **Connect** in the built-in Hamlib dialog. Turn the tuning knob and verify that the frequency follows. Select a CW tone and click **Start RX**. **Demo** runs the decoder on a generated signal with no hardware.
 4. To send, select the radio's upper-sideband audio/data mode and route the selected playback device to the radio input. Start at low power into a suitable dummy load. Enable **Enable TX**, then click **Send** or a macro. **Esc** stops the transmission. The app sends keyed audio tones under PTT in USB or upper-sideband data mode. The same transmit path is used for typed text and macros.
 
+### Decoder mode
+
+Select **Bayesian decoder** in **CW receive** before clicking **Start RX**. It compares symbol candidates using the measured lengths of marks and gaps. The checkbox is off by default and saved between launches. To change modes during reception, stop RX, change the checkbox, then start RX again.
+
 ## Connect a radio
 
 ### Built-in Hamlib

@@ -2,10 +2,35 @@ import unittest
 
 import numpy as np
 
-from cw_rig_desk.morse import AudioSpectrum, CwBandpass, PitchTracker, ToneDecoder, encode_text, waveform
+from cw_rig_desk.bayesian import BayesianSymbolDecoder
+from cw_rig_desk.morse import DECODE, AudioSpectrum, CwBandpass, PitchTracker, ToneDecoder, encode_text, waveform
 
 
 class MorseTests(unittest.TestCase):
+    def test_bayesian_decoder_compares_whole_symbol_when_dashes_are_short(self):
+        rate = 8000
+        dot = 1.2 / 18
+        parts = [np.zeros(rate // 3, dtype=np.float32)]
+        for units in (1.76, 0.72, 1.83):
+            length = round(units * dot * rate)
+            mark = (0.18 * np.sin(2 * np.pi * 700 * np.arange(length) / rate)).astype(np.float32)
+            mark[:32] *= np.linspace(0, 1, 32)
+            mark[-32:] *= np.linspace(1, 0, 32)
+            parts.extend((mark, np.zeros(round(0.72 * dot * rate), dtype=np.float32)))
+        parts.append(np.zeros(rate // 2, dtype=np.float32))
+        samples = np.concatenate(parts)
+        for alphabet, expected in (("LAT", "K"), ("RUS", "К")):
+            decoder = ToneDecoder(rate, 700, alphabet, 18, -34, bayesian=True)
+            result = "".join(decoder.feed(samples[i:i + 167]) for i in range(0, len(samples), 167))
+            self.assertEqual(result.strip(), expected)
+
+    def test_bayesian_decoder_rejects_ambiguous_and_unknown_symbols(self):
+        dot = 0.07
+        model = BayesianSymbolDecoder(DECODE["LAT"])
+        ambiguous = [(x * dot, 0.003) for x in (1.8, 1, 1)]
+        self.assertEqual(model.decode(ambiguous, [dot, dot], dot), ("�", None))
+        self.assertEqual(model.decode([(dot, 0.003)] * 6, [dot] * 5, dot), ("�", None))
+
     def test_short_fades_do_not_split_cw_marks(self):
         rate = 8000
         expected = "CQ CQ DE SO5CW SO5CW 5NN 73"

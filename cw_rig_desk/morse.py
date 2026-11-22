@@ -2,10 +2,12 @@
 
 import re
 from collections import deque
+from math import hypot
 from statistics import median
 
 import numpy as np
 
+from .bayesian import BayesianSymbolDecoder
 from .localization import Message
 
 LATIN = dict(zip(
@@ -92,7 +94,7 @@ def waveform(words, rate, wpm, pitch, gain, max_seconds=60):
 class MorseTiming:
     """Classify keyed runs and delimit letters and words during a pause."""
 
-    def __init__(self, alphabet, wpm, adaptive=True):
+    def __init__(self, alphabet, wpm, adaptive=True, bayesian=False):
         self.codebook = DECODE[alphabet]
         self.dot = 1.2 / wpm
         self.adaptive = adaptive
@@ -102,25 +104,50 @@ class MorseTiming:
         self.pattern = ""
         self.letter_written = False
         self.word_written = True
+        self.symbol_model = BayesianSymbolDecoder(self.codebook, adaptive) if bayesian else None
+        self.marks = []
+        self.gaps = []
+        self.mark_gap = 0.0
+        self.start_uncertainty = 0.0
 
-    def step(self, on, time):
+    def track_dot(self, age, mark):
+        candidate = age / (3 if mark == "-" else 1)
+        if self.adaptive and 0.62 * self.dot <= candidate <= 1.80 * self.dot:
+            self.dot_estimates.append(candidate)
+            self.dot = min(0.20, max(0.028, 0.72 * self.dot + 0.28 * median(self.dot_estimates)))
+
+    def finish_letter(self):
+        if self.symbol_model is None:
+            return self.codebook.get(self.pattern, "�")
+        letter, pattern = self.symbol_model.decode(self.marks, self.gaps, self.dot)
+        if pattern is not None:
+            for (duration, _), mark in zip(self.marks, pattern):
+                self.track_dot(duration, mark)
+        self.marks.clear()
+        self.gaps.clear()
+        return letter
+
+    def step(self, on, time, uncertainty=0.0):
         age = time - self.started
         result = ""
         if self.on and not on:
             if 0.43 * self.dot <= age <= 5.4 * self.dot:
-                dash = age >= 1.9 * self.dot
-                self.pattern += "-" if dash else "."
-                candidate = age / (3 if dash else 1)
-                if self.adaptive and 0.62 * self.dot <= candidate <= 1.80 * self.dot:
-                    self.dot_estimates.append(candidate)
-                    self.dot = min(0.20, max(0.028, 0.72 * self.dot + 0.28 * median(self.dot_estimates)))
+                mark = "-" if age >= 1.9 * self.dot else "."
+                if self.symbol_model is None:
+                    self.pattern += mark
+                    self.track_dot(age, mark)
+                elif len(self.marks) <= self.symbol_model.max_marks:
+                    if self.marks and self.mark_gap > 0:
+                        self.gaps.append(self.mark_gap)
+                    self.marks.append((age, hypot(self.start_uncertainty, uncertainty)))
+                    self.pattern += mark
             self.letter_written = False
             if self.pattern:
                 self.word_written = False
 
         if not self.on:
             if age >= 1.8 * self.dot and self.pattern and not self.letter_written:
-                result = self.codebook.get(self.pattern, "�")
+                result = self.finish_letter()
                 self.pattern = ""
                 self.letter_written = True
             if age >= 4.5 * self.dot and self.letter_written and not self.word_written:
@@ -128,6 +155,9 @@ class MorseTiming:
                 self.word_written = True
 
         if self.on != on:
+            if on and self.symbol_model is not None:
+                self.start_uncertainty = uncertainty
+                self.mark_gap = age if self.pattern else 0.0
             self.started = time
             self.on = on
         return result
@@ -254,7 +284,7 @@ class ToneDecoder:
     """Compare energy near the selected pitch with two nearby noise bands."""
 
     def __init__(self, rate, pitch, alphabet, wpm, sensitivity_db, adaptive=True, bandwidth_hz=0,
-                 auto_gain=False):
+                 auto_gain=False, bayesian=False):
         self.rate = rate
         self.pitch = pitch
         self.bandpass = CwBandpass(rate, pitch, bandwidth_hz) if bandwidth_hz else None
@@ -266,7 +296,7 @@ class ToneDecoder:
         phase = 2 * np.pi * frequencies[:, None] * np.arange(self.window_size) / rate
         self.bank = np.vstack((np.cos(phase), np.sin(phase))) * (2 * window / window.sum())
         self.residual = np.empty(0, dtype=np.float32)
-        self.timing = MorseTiming(alphabet, wpm, adaptive)
+        self.timing = MorseTiming(alphabet, wpm, adaptive, bayesian)
         self.threshold = 10 ** (sensitivity_db / 20)
         self.time_step = self.hop / rate
         self.steps = 0
@@ -278,6 +308,7 @@ class ToneDecoder:
         self.gain = 1.0
         self.noise_floor = 0.0
         self.peak_decay = float(np.exp(-self.time_step / 1.2))
+        self.edge_uncertainty = 0.0
 
     def feed(self, samples):
         if self.bandpass is not None:
@@ -316,7 +347,12 @@ class ToneDecoder:
         elif not self.key_down and self.streak == 0:
             self.noise_floor += 0.015 * (signal - self.noise_floor)
         threshold = max(self.threshold / self.gain, 3.0 * self.noise_floor, 2.55 * guard)
-        return signal >= threshold * (0.80 if self.key_down else 1.0)
+        threshold *= 0.80 if self.key_down else 1.0
+        tone = signal >= threshold
+        if self.timing.symbol_model is not None and tone != self.key_down and not self.streak:
+            contrast = abs(signal - threshold) / max(signal, threshold)
+            self.edge_uncertainty = self.time_step * (0.5 + 1.5 * (1 - contrast))
+        return tone
 
     def advance_key(self, tone):
         now = self.steps * self.time_step
@@ -332,4 +368,4 @@ class ToneDecoder:
             return ""
         self.key_down = tone
         self.streak = 0
-        return self.timing.step(tone, now - span + self.time_step)
+        return self.timing.step(tone, now - span + self.time_step, self.edge_uncertainty)

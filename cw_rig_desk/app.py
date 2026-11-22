@@ -44,7 +44,7 @@ DEFAULTS = {
     "language": "ru", "input": "", "output": "", "port": "", "address": "70", "pitch": "700",
     "rx_wpm": "18", "tx_wpm": "18", "sensitivity": "-34", "level": "12",
     "lead": "250", "alphabet": "LAT", "adaptive": True, "cw_filter": "Выкл.",
-    "auto_pitch": True,
+    "auto_pitch": True, "bayesian": False,
     "call": "", "other": "", "rst": "599", "macros": DEFAULT_MACROS,
     "profile": network.G90_PROFILE, "hamlib_host": "127.0.0.1", "hamlib_port": "4532",
     "tci_url": "ws://127.0.0.1:40001", "tci_receiver": "0", "tci_audio": True,
@@ -418,6 +418,9 @@ class App:
                     variable=self.settings["adaptive"]).pack(side="left")
         self.widget(ttk.Checkbutton, options, text="Авто тон",
                     variable=self.settings["auto_pitch"]).pack(side="left", padx=(12, 0))
+        self.bayesian_choice = self.widget(ttk.Checkbutton, options, text="Байесовский декодер",
+                                          variable=self.settings["bayesian"])
+        self.bayesian_choice.pack(side="left", padx=(12, 0))
 
     def build_transmit(self, parent):
         tx = ttk.Frame(parent, style="Card.TFrame", padding=14)
@@ -943,6 +946,7 @@ class App:
             "alphabet": self.settings["alphabet"].get(),
             "adaptive": self.settings["adaptive"].get(),
             "auto_pitch": self.settings["auto_pitch"].get(),
+            "bayesian": self.settings["bayesian"].get(),
             "bandwidth_hz": CW_FILTERS[self.settings["cw_filter"].get()],
         }
 
@@ -955,6 +959,7 @@ class App:
         can_stop = self.rx_running and not self.rx_stop.is_set() and not self.closing
         self.rx_stop_button.state(["!disabled" if can_stop else "disabled"])
         self.tci_audio_choice.state(["disabled" if self.rx_running else "!disabled"])
+        self.bayesian_choice.state(["disabled" if self.rx_running else "!disabled"])
 
     def start_rx(self):
         if self.rx_running or self.closing:

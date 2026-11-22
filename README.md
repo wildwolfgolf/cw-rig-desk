@@ -25,7 +25,7 @@ The top-right language selector switches between **Русский** and **Englis
 
 ### Decoder mode
 
-Select **Bayesian decoder** in **CW receive** before clicking **Start RX**. It compares symbol candidates using the measured lengths of marks and gaps. The checkbox is off by default and saved between launches. To change modes during reception, stop RX, change the checkbox, then start RX again.
+Select **Bayesian decoder** in **CW receive** before clicking **Start RX**. It compares several interpretations of both key presses and pauses. Text usually appears at the next word break. The checkbox is off by default and saved between launches. To change modes during reception, stop RX, change the checkbox, then start RX again.
 
 ## Connect a radio
 

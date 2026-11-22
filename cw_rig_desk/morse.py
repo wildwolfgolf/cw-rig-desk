@@ -7,7 +7,7 @@ from statistics import median
 
 import numpy as np
 
-from .bayesian import BayesianSymbolDecoder
+from .bayesian import BayesianSequenceDecoder
 from .localization import Message
 
 LATIN = dict(zip(
@@ -143,10 +143,10 @@ class MorseTiming:
         self.pattern = ""
         self.letter_written = False
         self.word_written = True
-        self.symbol_model = BayesianSymbolDecoder(self.codebook, adaptive) if bayesian else None
+        self.sequence_model = BayesianSequenceDecoder(self.codebook) if bayesian else None
         self.marks = []
         self.gaps = []
-        self.mark_gap = 0.0
+        self.last_mark_end = 0.0
         self.start_uncertainty = 0.0
         self.speed = KeySpeed() if adaptive else None
         self.last_mark = 0.0
@@ -157,57 +157,76 @@ class MorseTiming:
             self.dot_estimates.append(candidate)
             self.dot = min(0.20, max(0.028, 0.72 * self.dot + 0.28 * median(self.dot_estimates)))
 
-    def finish_letter(self):
-        if self.symbol_model is None:
-            return self.codebook.get(self.pattern, "�")
-        letter, pattern = self.symbol_model.decode(self.marks, self.gaps, self.dot)
-        if pattern is not None:
-            for (duration, _), mark in zip(self.marks, pattern):
-                self.track_dot(duration, mark)
+    def finish_sequence(self):
+        text, pattern = self.sequence_model.decode(self.marks, self.gaps, self.dot)
+        for (duration, _), mark in zip(self.marks, pattern):
+            self.track_dot(duration, mark)
         self.marks.clear()
         self.gaps.clear()
-        return letter
+        return text
+
+    def step_sequence(self, on, time, uncertainty):
+        age = time - self.started
+        result = ""
+        if self.on and not on:
+            self.last_mark = age
+            if 0.43 * self.dot <= age <= 5.4 * self.dot:
+                if self.marks:
+                    self.gaps.append(self.started - self.last_mark_end)
+                self.marks.append((age, hypot(self.start_uncertainty, uncertainty)))
+                self.last_mark_end = time
+
+        if not self.on:
+            pause = time - self.last_mark_end
+            word_boundary = pause >= 5.8 * self.dot
+            buffer_full = len(self.marks) >= 64 or (len(self.marks) >= 40 and pause >= 2.1 * self.dot)
+            if self.marks and (word_boundary or buffer_full):
+                result = self.finish_sequence() + (" " if word_boundary else "")
+            if on:
+                self.start_uncertainty = uncertainty
+
+        return result
 
     def step(self, on, time, uncertainty=0.0):
+        if self.sequence_model is not None:
+            result = self.step_sequence(on, time, uncertainty)
+            self.update_edge(on, time)
+            return result
+
         age = time - self.started
         result = ""
         if self.on and not on:
             self.last_mark = age
             if 0.43 * self.dot <= age <= 5.4 * self.dot:
                 mark = "-" if age >= 1.9 * self.dot else "."
-                if self.symbol_model is None:
-                    self.pattern += mark
-                    self.track_dot(age, mark)
-                elif len(self.marks) <= self.symbol_model.max_marks:
-                    if self.marks and self.mark_gap > 0:
-                        self.gaps.append(self.mark_gap)
-                    self.marks.append((age, hypot(self.start_uncertainty, uncertainty)))
-                    self.pattern += mark
+                self.pattern += mark
+                self.track_dot(age, mark)
             self.letter_written = False
             if self.pattern:
                 self.word_written = False
 
         if not self.on:
             if age >= 1.8 * self.dot and self.pattern and not self.letter_written:
-                result = self.finish_letter()
+                result = self.codebook.get(self.pattern, "�")
                 self.pattern = ""
                 self.letter_written = True
             if age >= 4.5 * self.dot and self.letter_written and not self.word_written:
                 result += " "
                 self.word_written = True
 
-        if self.on != on:
-            if on and self.speed is not None:
-                estimate = self.speed.observe(self.last_mark, age, self.dot)
-                if estimate is not None:
-                    self.dot_estimates.clear()
-                    self.dot = estimate
-            if on and self.symbol_model is not None:
-                self.start_uncertainty = uncertainty
-                self.mark_gap = age if self.pattern else 0.0
-            self.started = time
-            self.on = on
+        self.update_edge(on, time)
         return result
+
+    def update_edge(self, on, time):
+        if self.on == on:
+            return
+        if on and self.speed is not None:
+            estimate = self.speed.observe(self.last_mark, time - self.started, self.dot)
+            if estimate is not None:
+                self.dot_estimates.clear()
+                self.dot = estimate
+        self.started = time
+        self.on = on
 
 
 class CwBandpass:
@@ -400,7 +419,7 @@ class ToneDecoder:
                         loud_signal_floor)
         threshold *= 0.80 if self.key_down else 1.0
         tone = signal >= threshold
-        if self.timing.symbol_model is not None and tone != self.key_down and not self.streak:
+        if self.timing.sequence_model is not None and tone != self.key_down and not self.streak:
             contrast = abs(signal - threshold) / max(signal, threshold)
             self.edge_uncertainty = self.time_step * (0.5 + 1.5 * (1 - contrast))
         return tone

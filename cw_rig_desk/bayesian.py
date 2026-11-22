@@ -1,48 +1,73 @@
-"""Posterior decoding of a single Morse symbol from measured key timings."""
+"""Probabilistic beam search over Morse marks and gaps."""
 
-from itertools import product
-
-import numpy as np
+from math import hypot, log
 
 
-class BayesianSymbolDecoder:
-    """Score mark sequences under a shared dot duration and a tempo prior."""
+# A small, prior shared by both receive alphabets. Unknown words and calls remain possible.
+CW_WORDS = frozenset(("CQ", "DE", "TEST", "TU", "73", "599", "5NN",
+                      "ЦЩ", "ДЕ", "ТЕСТ", "ТУ", "5НН"))
 
-    def __init__(self, codebook, adaptive=True):
+
+def word_cost(word):
+    if word in CW_WORDS:
+        return -0.65
+    return 0.0
+
+
+class BayesianSequenceDecoder:
+    """Search over marks and boundaries jointly on a bounded stretch of CW."""
+
+    WIDTH = 24
+
+    def __init__(self, codebook):
         self.codebook = codebook
-        self.max_marks = max(map(len, codebook))
-        self.scales = np.linspace(0.70, 1.30, 13) if adaptive else np.array([1.0])
-        self.log_prior = -0.5 * ((self.scales - 1.0) / 0.17) ** 2
-        self.candidates = {}
-        for length in range(1, self.max_marks + 1):
-            patterns = tuple("".join(bits) for bits in product(".-", repeat=length))
-            units = np.array([[1 if mark == "." else 3 for mark in pattern] for pattern in patterns])
-            expected = units[None, :, :] * self.scales[:, None, None]
-            spread = (0.24 + 0.065 * units[None, :, :]) * self.scales[:, None, None]
-            self.candidates[length] = patterns, expected, spread
+        self.prefixes = {pattern[:i] for pattern in codebook for i in range(1, len(pattern) + 1)}
 
     def decode(self, marks, gaps, dot):
-        if len(marks) not in self.candidates:
-            return "�", None
-        patterns, expected, spread = self.candidates[len(marks)]
-        durations, uncertainty = np.asarray(marks, dtype=float).T / dot
-        # Broaden each likelihood when the two key edges were close to the
-        # tone detector's threshold. Keep an absolute fit check for noise.
-        sigma = np.hypot(spread, uncertainty)
-        residual = (durations - expected) / sigma
-        scores = (-0.5 * residual ** 2 - np.log(sigma)).sum(axis=2)
-        scores += self.log_prior[:, None]
-        if gaps:
-            # Internal spaces are also evidence of the common dot length.
-            error = (np.asarray(gaps)[None, :] / dot - self.scales[:, None]) / 0.36
-            scores -= 0.5 * np.mean(error ** 2, axis=1)[:, None]
+        if not marks:
+            return "", ()
 
-        log_weights = np.logaddexp.reduce(scores, axis=0)
-        choice = int(np.argmax(log_weights))
-        probability = np.exp(log_weights[choice] - np.logaddexp.reduce(log_weights))
-        best_tempo = int(np.argmax(scores[:, choice]))
-        fit = np.mean(residual[best_tempo, choice] ** 2)
-        pattern = patterns[choice]
-        if probability < 0.60 or fit > 4.0 or pattern not in self.codebook:
-            return "�", None
-        return self.codebook[pattern], pattern
+        # Each hypothesis carries the open Morse symbol and its current word.
+        # The parts record the chosen marks for the existing tempo tracker.
+        states = [(0.0, "", "", "", ())]
+        for index, (duration, uncertainty) in enumerate(marks):
+            spread = hypot(0.33, uncertainty / max(dot, duration))
+            duration = max(duration / dot, 0.08)
+            mark_cost = {mark: 0.5 * (log(duration / units) / spread) ** 2
+                         for mark, units in ((".", 1), ("-", 3))}
+            if index:
+                gap = max(gaps[index - 1] / dot, 0.08)
+                gap_cost = [0.5 * (log(gap / units) / spread) ** 2
+                            for units, spread in ((1, 0.45), (3, 0.36), (7, 0.43))]
+            expanded = {}
+            for score, text, word, prefix, parts in states:
+                options = [(score + (gap_cost[0] if index else 0), text, word, prefix)]
+                if prefix:
+                    next_word = word + self.codebook.get(prefix, "�")
+                    penalty = 0 if prefix in self.codebook else 4.0
+                    options.extend((
+                        (score + gap_cost[1] + penalty, text, next_word, ""),
+                        (score + gap_cost[2] + penalty + word_cost(next_word),
+                         text + next_word + " ", "", ""),
+                    ))
+                for cost, output, current_word, stem in options:
+                    for mark, change in mark_cost.items():
+                        pattern = stem + mark
+                        if pattern not in self.prefixes:
+                            continue
+                        key = output, current_word, pattern
+                        total = cost + change
+                        if key not in expanded or total < expanded[key][0]:
+                            expanded[key] = (total, *key, parts + (mark,))
+            states = sorted(expanded.values())[:self.WIDTH]
+
+        def finish(state):
+            score, text, word, pattern, parts = state
+            word += self.codebook.get(pattern, "�")
+            penalty = 0 if pattern in self.codebook else 4.0
+            return score + word_cost(word) + penalty, text + word, parts
+
+        cost, text, parts = min(map(finish, states))
+        if cost > 3.0 * len(marks):
+            return "�", ()
+        return text, parts

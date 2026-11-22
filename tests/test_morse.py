@@ -2,7 +2,7 @@ import unittest
 
 import numpy as np
 
-from cw_rig_desk.bayesian import BayesianSymbolDecoder
+from cw_rig_desk.bayesian import BayesianSequenceDecoder
 from cw_rig_desk.morse import DECODE, AudioSpectrum, CwBandpass, PitchTracker, ToneDecoder, encode_text, waveform
 
 
@@ -45,12 +45,29 @@ class MorseTests(unittest.TestCase):
             result = "".join(decoder.feed(samples[i:i + 167]) for i in range(0, len(samples), 167))
             self.assertEqual(result.strip(), expected)
 
-    def test_bayesian_decoder_rejects_ambiguous_and_unknown_symbols(self):
-        dot = 0.07
-        model = BayesianSymbolDecoder(DECODE["LAT"])
-        ambiguous = [(x * dot, 0.003) for x in (1.8, 1, 1)]
-        self.assertEqual(model.decode(ambiguous, [dot, dot], dot), ("�", None))
-        self.assertEqual(model.decode([(dot, 0.003)] * 6, [dot] * 5, dot), ("�", None))
+    def test_bayesian_decoder_recovers_a_letter_with_a_stretched_internal_gap(self):
+        rate, pitch, wpm = 8000, 700, 20
+        dot = 1.2 / wpm
+        parts = [np.zeros(rate // 4, dtype=np.float32)]
+        # T E S T, with the second internal gap of S close to a letter gap.
+        for index, units in enumerate((3, 1, 1, 1, 1, 3)):
+            length = round(units * dot * rate)
+            tone = (0.18 * np.sin(2 * np.pi * pitch * np.arange(length) / rate)).astype(np.float32)
+            tone[:32] *= np.linspace(0, 1, 32)
+            tone[-32:] *= np.linspace(1, 0, 32)
+            gap = (3, 3, 1, 1.96, 3, 12)[index]
+            parts.extend((tone, np.zeros(round(gap * dot * rate), dtype=np.float32)))
+        samples = np.concatenate(parts)
+        for alphabet, expected in (("LAT", "TEST"), ("RUS", "ТЕСТ")):
+            for size in (173, 2048):
+                with self.subTest(alphabet=alphabet, size=size):
+                    decoder = ToneDecoder(rate, pitch, alphabet, wpm, -34, adaptive=False, bayesian=True)
+                    result = "".join(decoder.feed(samples[i:i + size]) for i in range(0, samples.size, size))
+                    self.assertEqual(result, expected + " ")
+
+    def test_bayesian_decoder_rejects_a_mark_with_no_reasonable_fit(self):
+        model = BayesianSequenceDecoder(DECODE["LAT"])
+        self.assertEqual(model.decode([(0.45, 0.001)], [], 0.05), ("�", ()))
 
     def test_short_fades_do_not_split_cw_marks(self):
         rate = 8000

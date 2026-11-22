@@ -154,7 +154,8 @@ def demo(settings, report):
     rate_wpm = settings["wpm"]
     phrase = "CQ CQ DE TEST 5NN" if settings["alphabet"] == "LAT" else "ВНИМАНИЕ ТЕСТ 73"
     tone = waveform(encode_text(phrase), rate, rate_wpm, settings["pitch"], 0.28)
-    noise = np.random.default_rng(42).normal(0, 0.025, len(tone) + rate // 2)
+    tail = round(rate * max(0.5, 7 * 1.2 / rate_wpm))
+    noise = np.random.default_rng(42).normal(0, 0.025, len(tone) + tail)
     noise = noise.astype(np.float32)
     noise[:len(tone)] += tone
     options = {key: value for key, value in settings.items() if key != "auto_pitch"}

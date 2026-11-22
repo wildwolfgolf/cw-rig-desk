@@ -1,5 +1,17 @@
 # История версий / Changelog
 
+## 1.3.2
+
+### Русский
+
+- Декодер удерживает посылку при коротких провалах звука и отбрасывает короткие импульсы.
+- Автоматическое усиление TCI опирается на уровень выбранного тона. Подстройка скорости использует несколько последних посылок.
+
+### English
+
+- The decoder keeps marks intact across brief audio dropouts and rejects short impulses.
+- TCI automatic gain follows the selected tone. Speed tracking uses several recent marks.
+
 ## 1.3.1
 
 ### Русский

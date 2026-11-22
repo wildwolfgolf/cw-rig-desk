@@ -1,6 +1,8 @@
 """CW alphabet, timing, tone generation and streaming discrimination."""
 
 import re
+from collections import deque
+from statistics import median
 
 import numpy as np
 
@@ -92,9 +94,9 @@ class MorseTiming:
 
     def __init__(self, alphabet, wpm, adaptive=True):
         self.codebook = DECODE[alphabet]
-        self.initial_dot = 1.2 / wpm
-        self.dot = self.initial_dot
+        self.dot = 1.2 / wpm
         self.adaptive = adaptive
+        self.dot_estimates = deque(maxlen=7)
         self.on = False
         self.started = 0.0
         self.pattern = ""
@@ -105,22 +107,23 @@ class MorseTiming:
         age = time - self.started
         result = ""
         if self.on and not on:
-            if 0.36 * self.dot <= age <= 5.4 * self.dot:
+            if 0.43 * self.dot <= age <= 5.4 * self.dot:
                 dash = age >= 1.9 * self.dot
                 self.pattern += "-" if dash else "."
-                candidate = max(0, age - 0.005) / (3 if dash else 1)
-                if self.adaptive and 0.65 * self.dot < candidate < 1.50 * self.dot:
-                    self.dot = min(0.20, max(0.028, 0.84 * self.dot + 0.16 * candidate))
+                candidate = age / (3 if dash else 1)
+                if self.adaptive and 0.62 * self.dot <= candidate <= 1.80 * self.dot:
+                    self.dot_estimates.append(candidate)
+                    self.dot = min(0.20, max(0.028, 0.72 * self.dot + 0.28 * median(self.dot_estimates)))
             self.letter_written = False
             if self.pattern:
                 self.word_written = False
 
         if not self.on:
-            if age >= 2.35 * self.dot and self.pattern and not self.letter_written:
+            if age >= 1.8 * self.dot and self.pattern and not self.letter_written:
                 result = self.codebook.get(self.pattern, "�")
                 self.pattern = ""
                 self.letter_written = True
-            if age >= 5.2 * self.dot and self.letter_written and not self.word_written:
+            if age >= 4.5 * self.dot and self.letter_written and not self.word_written:
                 result += " "
                 self.word_written = True
 
@@ -273,17 +276,10 @@ class ToneDecoder:
         self.auto_gain = auto_gain
         self.peak = 0.0
         self.gain = 1.0
+        self.noise_floor = 0.0
+        self.peak_decay = float(np.exp(-self.time_step / 1.2))
 
     def feed(self, samples):
-        if self.auto_gain and len(samples):
-            # SDR streams arrive at whatever level the radio produces. Lift
-            # quiet audio slowly so the absolute threshold still works.
-            peak = float(np.max(np.abs(samples)))
-            self.peak = max(peak, self.peak * np.exp(-len(samples) / (self.rate * 2.0)))
-            if self.peak > 0:
-                self.gain = min(100.0, max(1.0, 0.25 / self.peak))
-                if self.gain > 1.0:
-                    samples = samples * self.gain
         if self.bandpass is not None:
             samples = self.bandpass.feed(samples)
         samples = np.concatenate((self.residual, samples))
@@ -297,16 +293,43 @@ class ToneDecoder:
             amplitudes = np.hypot(channels[:7], channels[7:])
             signal = float(amplitudes[2:5].max())
             guard = max(float(amplitudes[:2].max()), float(amplitudes[5:].max()))
-            self.level = 20 * np.log10(max(signal, 1e-5)) - 20 * np.log10(self.gain)
-            # Hysteresis and two consecutive frames suppress short impulses.
-            tone = signal >= max(self.threshold * (0.83 if self.key_down else 1),
-                                 guard * (1.9 if self.key_down else 2.9))
-            self.streak = self.streak + 1 if tone != self.key_down else 0
-            if self.streak >= 2:
-                self.key_down = tone
-                self.streak = 0
+            tone = self.detect_tone(signal, guard)
             self.steps += 1
-            char = self.timing.step(self.key_down, self.steps * self.time_step)
+            char = self.advance_key(tone)
             if char:
                 result.append(char)
         return "".join(result)
+
+    def detect_tone(self, signal, guard):
+        self.level = 20 * np.log10(max(signal, 1e-5))
+        if self.auto_gain:
+            # Adjust from energy near the CW tone, so a broadband impulse
+            # or an adjacent station does not set the gain for an entire block.
+            self.peak *= self.peak_decay
+            if signal >= guard * 2.0:
+                self.peak = max(signal, self.peak)
+            self.gain = min(100.0, max(1.0, 0.25 / max(self.peak, 0.0025)))
+        # Estimate the floor quickly when a pause gets quieter and slowly
+        # when its level rises. A key-down measurement must not raise it.
+        if signal < self.noise_floor:
+            self.noise_floor += 0.055 * (signal - self.noise_floor)
+        elif not self.key_down and self.streak == 0:
+            self.noise_floor += 0.015 * (signal - self.noise_floor)
+        threshold = max(self.threshold / self.gain, 3.0 * self.noise_floor, 2.55 * guard)
+        return signal >= threshold * (0.80 if self.key_down else 1.0)
+
+    def advance_key(self, tone):
+        now = self.steps * self.time_step
+        if tone == self.key_down:
+            self.streak = 0
+            return self.timing.step(tone, now)
+        self.streak += 1
+        # Wait out very short clicks and fades, then date the confirmed
+        # transition at its first frame to preserve the measured duration.
+        span = self.streak * self.time_step
+        required = max(0.010, min(0.025, self.timing.dot * (0.33 if self.key_down else 0.20)))
+        if span + 1e-9 < required:
+            return ""
+        self.key_down = tone
+        self.streak = 0
+        return self.timing.step(tone, now - span + self.time_step)

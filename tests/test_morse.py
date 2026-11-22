@@ -2,10 +2,50 @@ import unittest
 
 import numpy as np
 
-from cw_rig_desk.morse import AudioSpectrum, PitchTracker, ToneDecoder, encode_text, waveform
+from cw_rig_desk.morse import AudioSpectrum, CwBandpass, PitchTracker, ToneDecoder, encode_text, waveform
 
 
 class MorseTests(unittest.TestCase):
+    def test_short_fades_do_not_split_cw_marks(self):
+        rate = 8000
+        expected = "CQ CQ DE SO5CW SO5CW 5NN 73"
+        data = waveform(encode_text(expected), rate, 18, 700, 0.17)
+        samples = np.pad(data, (3200, 6400))
+        for start in range(4370, len(samples) - 200, 1073):
+            samples[start:start + 144] *= 0.06  # 18 ms, shorter than an element gap
+        decoder = ToneDecoder(rate, 700, "LAT", 18, -34)
+        result = "".join(decoder.feed(samples[i:i + 193]) for i in range(0, len(samples), 193))
+        self.assertEqual(result.strip(), expected)
+
+    def test_tci_gain_and_decoding_are_independent_of_packet_size(self):
+        rate = 8000
+        expected = "CQ TEST"
+        data = waveform(encode_text(expected), rate, 22, 700, 0.004)
+        samples = np.pad(data, (400, rate // 2))
+        samples[2035] += 0.8  # An impulse should not hold down gain for subsequent marks.
+        for size in (173, 512, 2048):
+            with self.subTest(size=size):
+                decoder = ToneDecoder(rate, 700, "LAT", 22, -34, auto_gain=True)
+                result = "".join(decoder.feed(samples[i:i + size]) for i in range(0, len(samples), size))
+                self.assertEqual(result.strip(), expected)
+
+    def test_auto_gain_rejects_noise_shaped_by_the_receiver(self):
+        rate = 8000
+        noise = np.random.default_rng(96).normal(0, 0.06, rate * 15).astype(np.float32)
+        samples = CwBandpass(rate, 700, 220).feed(noise)
+        decoder = ToneDecoder(rate, 700, "LAT", 18, -34, auto_gain=True)
+        result = "".join(decoder.feed(samples[i:i + 193]) for i in range(0, len(samples), 193))
+        self.assertEqual(result, "")
+
+    def test_speed_tracking_accepts_cw_faster_than_initial_setting(self):
+        rate = 8000
+        expected = "CQ CQ DE SO5CW SO5CW 5NN 73"
+        data = waveform(encode_text(expected), rate, 27, 700, 0.17)
+        samples = np.pad(data, (3200, 6400))
+        decoder = ToneDecoder(rate, 700, "LAT", 18, -34)
+        result = "".join(decoder.feed(samples[i:i + 193]) for i in range(0, len(samples), 193))
+        self.assertEqual(result.strip(), expected)
+
     def test_filtered_decode_at_48khz(self):
         rate = 48000
         expected = "CQ DE TEST 73"
